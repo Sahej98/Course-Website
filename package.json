@@ -1,31 +1,30 @@
 {
-  "name": "course-website",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "name": "learnhub",
+  "version": "1.0.0",
+  "description": "This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.",
+  "main": "index.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "server": "cd server && nodemon server.js",
+    "client": "cd client && npm run dev",
+    "seed": "cd server && node seed.js",
+    "build-client": "cd client && npm i",
+    "build-server": "cd server && npm i",
+    "build": "concurrently \"npm run build-client\" \"npm run build-server\"",
+    "start": "concurrently \"npm run client\" \"npm run server\""
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sahej98/Course-Website.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Sahej98/Course-Website/issues"
+  },
+  "homepage": "https://github.com/Sahej98/Course-Website#readme",
   "dependencies": {
-    "bootstrap": "^5.3.7",
-    "framer-motion": "^12.23.12",
-    "lucide-react": "^0.535.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "react-router-dom": "^7.7.1"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.25.0",
-    "@types/react": "^19.1.2",
-    "@types/react-dom": "^19.1.2",
-    "@vitejs/plugin-react": "^4.4.1",
-    "eslint": "^9.25.0",
-    "eslint-plugin-react-hooks": "^5.2.0",
-    "eslint-plugin-react-refresh": "^0.4.19",
-    "globals": "^16.0.0",
-    "vite": "^6.3.5"
+    "concurrently": "^9.2.1"
   }
 }
