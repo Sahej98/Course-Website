@@ -11,6 +11,8 @@ import {
   BarChart2,
   TrendingUp,
   Award,
+  Users,
+  BookOpen,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -19,7 +21,6 @@ const Analytics = () => {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [hoveredPoint, setHoveredPoint] = useState(null);
   const dateInputRef = useRef(null);
 
   const isStudent = currentUser?.role === 'STUDENT';
@@ -53,10 +54,6 @@ const Analytics = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleOpenCalendar = () => {
-    if (dateInputRef.current) dateInputRef.current.showPicker();
-  };
-
   if (loading)
     return (
       <div className='flex justify-center p-8'>
@@ -65,34 +62,9 @@ const Analytics = () => {
     );
   if (!data) return <div>Failed to load data</div>;
 
-  // Helpers for Chart
-  const chartHeight = 150;
-  const chartWidth = 600;
-  // If student, we don't need the big area chart unless we want to map something else.
-  // For Admin: Enrollment Trend
-  const maxStudents =
-    !isStudent && data.enrollmentTrend
-      ? Math.max(...data.enrollmentTrend.map((d) => d.students)) * 1.2
-      : 10;
-  const getX = (index) =>
-    (index / ((data.enrollmentTrend?.length || 1) - 1)) * chartWidth;
-  const getY = (val) => chartHeight - (val / maxStudents) * chartHeight;
-  const points =
-    !isStudent && data.enrollmentTrend
-      ? data.enrollmentTrend
-          .map((d, i) => `${getX(i)},${getY(d.students)}`)
-          .join(' ')
-      : '';
-
   return (
     <div className='animate-fade-in'>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '1.5rem',
-        }}>
+      <div className='responsive-header' style={{ marginBottom: '1.5rem' }}>
         <div>
           <h1
             style={{
@@ -106,7 +78,7 @@ const Analytics = () => {
           <p style={{ color: '#64748b', margin: 0 }}>
             {isStudent
               ? 'Track your personal learning progress.'
-              : 'Overview of student performance and enrollment.'}
+              : 'Overview of course performance.'}
           </p>
         </div>
         <button className='btn btn-outline' onClick={handleDownloadReport}>
@@ -114,17 +86,11 @@ const Analytics = () => {
         </button>
       </div>
 
-      <div
-        className='dashboard-grid analytics-grid'
-        style={{
-          gridTemplateColumns: '1.5fr 1fr',
-          gap: '1.5rem',
-          alignItems: 'start',
-        }}>
+      <div className='analytics-layout'>
         {/* Left Column */}
         <div
           style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* STUDENT VIEW: My Progress Cards */}
+          {/* STUDENT VIEW */}
           {isStudent && (
             <div className='grid-2'>
               <div
@@ -153,7 +119,7 @@ const Analytics = () => {
                     fontSize: '0.9rem',
                     opacity: 0.8,
                   }}>
-                  Across all graded assignments
+                  Across graded assignments
                 </div>
               </div>
               <div
@@ -188,145 +154,103 @@ const Analytics = () => {
             </div>
           )}
 
-          {/* ADMIN VIEW: Enrollment Chart */}
+          {/* ADMIN/TEACHER VIEW: Key Metrics */}
           {!isStudent && (
-            <div className='card' style={{ padding: '1.5rem' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '1.5rem',
-                }}>
-                <h3
-                  style={{ fontSize: '1.1rem', fontWeight: '700', margin: 0 }}>
-                  Student Enrollment Over Time
-                </h3>
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: '0.5rem',
-                    position: 'relative',
-                  }}>
-                  <input
-                    type='date'
-                    ref={dateInputRef}
-                    style={{
-                      position: 'absolute',
-                      opacity: 0,
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: '100%',
-                    }}
-                  />
-                  <button
-                    className='btn btn-sm'
-                    style={{ background: '#eff6ff', color: '#2563eb' }}
-                    onClick={handleOpenCalendar}>
-                    <ClockIcon size={12} /> Last 6 Months
-                  </button>
-                </div>
-              </div>
-              <div
-                style={{
-                  position: 'relative',
-                  height: '200px',
-                  width: '100%',
-                  overflow: 'hidden',
-                }}>
-                <svg
-                  viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-                  preserveAspectRatio='none'
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    overflow: 'visible',
-                  }}>
-                  <defs>
-                    <linearGradient
-                      id='chartGradient'
-                      x1='0'
-                      y1='0'
-                      x2='0'
-                      y2='1'>
-                      <stop offset='0%' stopColor='#3b82f6' stopOpacity='0.2' />
-                      <stop offset='100%' stopColor='#3b82f6' stopOpacity='0' />
-                    </linearGradient>
-                  </defs>
-                  {[0, 0.33, 0.66, 1].map((p, i) => (
-                    <line
-                      key={i}
-                      x1='0'
-                      y1={chartHeight * p}
-                      x2={chartWidth}
-                      y2={chartHeight * p}
-                      stroke='#f1f5f9'
-                      strokeWidth='1'
-                    />
-                  ))}
-                  <path
-                    d={`M ${points} L ${chartWidth},${chartHeight} L 0,${chartHeight} Z`}
-                    fill='url(#chartGradient)'
-                    stroke='none'
-                  />
-                  <polyline
-                    points={points}
-                    fill='none'
-                    stroke='#2563eb'
-                    strokeWidth='3'
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                  />
-                  {data.enrollmentTrend.map((d, i) => (
-                    <g
-                      key={i}
-                      onMouseEnter={() => setHoveredPoint(i)}
-                      onMouseLeave={() => setHoveredPoint(null)}>
-                      <circle
-                        cx={getX(i)}
-                        cy={getY(d.students)}
-                        r='6'
-                        fill='white'
-                        stroke='#2563eb'
-                        strokeWidth='3'
-                        style={{ cursor: 'pointer' }}
-                      />
-                      {hoveredPoint === i && (
-                        <g>
-                          <rect
-                            x={getX(i) - 35}
-                            y={getY(d.students) - 35}
-                            width='70'
-                            height='25'
-                            rx='4'
-                            fill='#1e293b'
-                          />
-                          <text
-                            x={getX(i)}
-                            y={getY(d.students) - 18}
-                            textAnchor='middle'
-                            fill='white'
-                            fontSize='10'
-                            fontWeight='bold'>
-                            {d.students} Students
-                          </text>
-                        </g>
-                      )}
-                    </g>
-                  ))}
-                </svg>
+            <div className='grid-2'>
+              <div className='card' style={{ padding: '1.5rem' }}>
                 <div
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    marginTop: '0.5rem',
-                    color: '#64748b',
+                    alignItems: 'center',
+                  }}>
+                  <div>
+                    <h3
+                      style={{
+                        fontSize: '0.9rem',
+                        color: '#64748b',
+                        textTransform: 'uppercase',
+                        marginBottom: '0.5rem',
+                      }}>
+                      Total Courses
+                    </h3>
+                    <div
+                      style={{
+                        fontSize: '2rem',
+                        fontWeight: '800',
+                        color: '#0f172a',
+                      }}>
+                      {data.totalCourses}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      background: '#eff6ff',
+                      borderRadius: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#2563eb',
+                    }}>
+                    <BookOpen size={24} />
+                  </div>
+                </div>
+              </div>
+              <div className='card' style={{ padding: '1.5rem' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}>
+                  <div>
+                    <h3
+                      style={{
+                        fontSize: '0.9rem',
+                        color: '#64748b',
+                        textTransform: 'uppercase',
+                        marginBottom: '0.5rem',
+                      }}>
+                      Total Enrolled
+                    </h3>
+                    <div
+                      style={{
+                        fontSize: '2rem',
+                        fontWeight: '800',
+                        color: '#0f172a',
+                      }}>
+                      {data.totalEnrolled}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      background: '#f0fdf4',
+                      borderRadius: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#16a34a',
+                    }}>
+                    <Users size={24} />
+                  </div>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '1rem',
+                    marginTop: '1rem',
                     fontSize: '0.8rem',
                   }}>
-                  {data.enrollmentTrend.map((d, i) => (
-                    <span key={i}>{d.month}</span>
-                  ))}
+                  <span style={{ color: '#16a34a' }}>
+                    Completed: {data.completedStudents}
+                  </span>
+                  <span style={{ color: '#ea580c' }}>
+                    Ongoing: {data.ongoingStudents}
+                  </span>
                 </div>
               </div>
             </div>
@@ -341,7 +265,7 @@ const Analytics = () => {
                 marginBottom: '1rem',
               }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: '700', margin: 0 }}>
-                {isStudent ? 'My Learning Activity' : 'Global Activity Heatmap'}
+                {isStudent ? 'My Learning Activity' : 'Submission Activity'}
               </h3>
               <MoreHorizontal size={16} color='#94a3b8' />
             </div>
@@ -379,7 +303,7 @@ const Analytics = () => {
         {/* Right Column */}
         <div
           style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* STUDENT: Recent Graded Assignments */}
+          {/* STUDENT: Recent Graded */}
           {isStudent && (
             <div className='card' style={{ padding: '1.5rem' }}>
               <h3
@@ -427,7 +351,7 @@ const Analytics = () => {
             </div>
           )}
 
-          {/* ADMIN: Assignment Stats */}
+          {/* ADMIN: Assignment Stats (Low Completion only) */}
           {!isStudent && (
             <div className='card' style={{ padding: '0' }}>
               <div
@@ -437,112 +361,63 @@ const Analytics = () => {
                 }}>
                 <h3
                   style={{ fontSize: '1.1rem', fontWeight: '700', margin: 0 }}>
-                  Assignment Completion
+                  Assignments Needing Attention
                 </h3>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0 }}>
+                  Lowest completion rates
+                </p>
               </div>
-              {data.assignmentStats.map((assign, i) => (
-                <div
-                  key={i}
-                  style={{
-                    padding: '1rem 1.5rem',
-                    borderBottom: '1px solid #f1f5f9',
-                  }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      marginBottom: '0.5rem',
-                    }}>
-                    <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>
-                      {assign.title}
-                    </span>
-                    <span style={{ fontWeight: 'bold' }}>
-                      {assign.completionRate}%
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      width: '100%',
-                      height: '6px',
-                      background: '#e2e8f0',
-                      borderRadius: '4px',
-                    }}>
-                    <div
-                      style={{
-                        width: `${assign.completionRate}%`,
-                        background: i === 0 ? '#f97316' : '#3b82f6',
-                        height: '100%',
-                        borderRadius: '4px',
-                      }}></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* ADMIN: Top Students */}
-          {!isStudent && (
-            <div className='card' style={{ padding: '1.5rem' }}>
-              <h3
-                style={{
-                  fontSize: '1.1rem',
-                  fontWeight: '700',
-                  margin: '0 0 1.5rem 0',
-                }}>
-                Top Performing Students
-              </h3>
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '1rem',
-                }}>
-                {data.topStudents.map((student, i) => (
+              {data.assignmentStats && data.assignmentStats.length > 0 ? (
+                data.assignmentStats.map((assign, i) => (
                   <div
                     key={i}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
+                      padding: '1rem 1.5rem',
+                      borderBottom: '1px solid #f1f5f9',
                     }}>
                     <div
                       style={{
                         display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.75rem',
+                        justifyContent: 'space-between',
+                        marginBottom: '0.5rem',
                       }}>
-                      <img
-                        src={student.avatar}
-                        style={{
-                          width: '32px',
-                          height: '32px',
-                          borderRadius: '50%',
-                        }}
-                        alt=''
-                      />
-                      <span
-                        style={{
-                          fontWeight: '600',
-                          fontSize: '0.9rem',
-                          color: '#334155',
-                        }}>
-                        {student.name}
+                      <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>
+                        {assign.title}
+                      </span>
+                      <span style={{ fontWeight: 'bold', color: '#ea580c' }}>
+                        {assign.completionRate}%
                       </span>
                     </div>
                     <div
                       style={{
-                        background: '#f8fafc',
-                        padding: '0.25rem 0.75rem',
-                        borderRadius: '6px',
-                        fontWeight: '700',
-                        fontSize: '0.9rem',
-                        color: '#0f172a',
+                        width: '100%',
+                        height: '6px',
+                        background: '#e2e8f0',
+                        borderRadius: '4px',
                       }}>
-                      {student.score}%
+                      <div
+                        style={{
+                          width: `${assign.completionRate}%`,
+                          background: '#ea580c',
+                          height: '100%',
+                          borderRadius: '4px',
+                        }}></div>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.75rem',
+                        color: '#94a3b8',
+                        marginTop: '0.25rem',
+                      }}>
+                      {assign.courseTitle}
                     </div>
                   </div>
-                ))}
-              </div>
+                ))
+              ) : (
+                <div style={{ padding: '1.5rem', color: '#94a3b8' }}>
+                  All assignments have high completion rates!
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -550,20 +425,5 @@ const Analytics = () => {
     </div>
   );
 };
-
-const ClockIcon = ({ size }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'>
-    <circle cx='12' cy='12' r='10'></circle>
-    <polyline points='12 6 12 12 16 14'></polyline>
-  </svg>
-);
 
 export default Analytics;

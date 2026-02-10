@@ -6,15 +6,16 @@ import {
   Plus,
   Trash,
   ArrowLeft,
-  Link as LinkIcon,
-  Video,
-  FileText,
+  Upload,
+  HelpCircle,
+  List,
 } from 'lucide-react';
+import { AlertModal } from '../components/CustomModals';
 
 const CourseForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { fetchCourseById, createCourse, updateCourse } = useApp();
+  const { fetchCourseById, createCourse, updateCourse, uploadFile } = useApp();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
@@ -23,6 +24,14 @@ const CourseForm = () => {
       'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80',
     modules: [],
     assignments: [],
+  });
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [alertInfo, setAlertInfo] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info',
+    onClose: () => {},
   });
 
   useEffect(() => {
@@ -34,8 +43,13 @@ const CourseForm = () => {
           setLoading(false);
         })
         .catch(() => {
-          alert('Failed to load course');
-          navigate('/courses');
+          setAlertInfo({
+            isOpen: true,
+            title: 'Error',
+            message: 'Failed to load course details.',
+            type: 'error',
+            onClose: () => navigate('/courses'),
+          });
         });
     }
   }, [id]);
@@ -51,9 +65,54 @@ const CourseForm = () => {
       }
       navigate('/courses');
     } catch (error) {
-      alert('Failed to save course');
+      setAlertInfo({
+        isOpen: true,
+        title: 'Error',
+        message: 'Failed to save course.',
+        type: 'error',
+      });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleThumbnailUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const res = await uploadFile(file);
+      setFormData({ ...formData, thumbnail: res.url });
+    } catch (e) {
+      setAlertInfo({
+        isOpen: true,
+        title: 'Upload Failed',
+        message: 'Thumbnail upload failed.',
+        type: 'error',
+      });
+    }
+  };
+
+  const handleFileUpload = async (e, moduleIndex, resourceIndex) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      setUploadProgress(10);
+      const res = await uploadFile(file, (percent) =>
+        setUploadProgress(percent),
+      );
+      const newModules = [...formData.modules];
+      newModules[moduleIndex].resources[resourceIndex].url = res.url;
+      newModules[moduleIndex].resources[resourceIndex].title = file.name;
+      setFormData({ ...formData, modules: newModules });
+    } catch (err) {
+      setAlertInfo({
+        isOpen: true,
+        title: 'Upload Failed',
+        message: 'Could not upload file.',
+        type: 'error',
+      });
+    } finally {
+      setUploadProgress(0);
     }
   };
 
@@ -116,6 +175,9 @@ const CourseForm = () => {
           description: '',
           dueDate: new Date().toISOString().split('T')[0],
           totalPoints: 100,
+          antiCheat: false,
+          timeLimit: 0,
+          questions: [],
         },
       ],
     });
@@ -132,8 +194,58 @@ const CourseForm = () => {
     setFormData({ ...formData, assignments: newAssign });
   };
 
+  // Questions Logic
+  const addQuestion = (assignIndex, type) => {
+    const newAssign = [...formData.assignments];
+    newAssign[assignIndex].questions.push({
+      id: Date.now().toString(),
+      type,
+      questionText: '',
+      options: type === 'mcq' ? ['Option 1', 'Option 2'] : [],
+      points: 10,
+    });
+    setFormData({ ...formData, assignments: newAssign });
+  };
+
+  const updateQuestion = (assignIndex, qIndex, field, value) => {
+    const newAssign = [...formData.assignments];
+    newAssign[assignIndex].questions[qIndex][field] = value;
+    setFormData({ ...formData, assignments: newAssign });
+  };
+
+  const updateOption = (assignIndex, qIndex, oIndex, value) => {
+    const newAssign = [...formData.assignments];
+    newAssign[assignIndex].questions[qIndex].options[oIndex] = value;
+    setFormData({ ...formData, assignments: newAssign });
+  };
+
+  const addOption = (assignIndex, qIndex) => {
+    const newAssign = [...formData.assignments];
+    newAssign[assignIndex].questions[qIndex].options.push('New Option');
+    setFormData({ ...formData, assignments: newAssign });
+  };
+
+  const deleteQuestion = (assignIndex, qIndex) => {
+    const newAssign = [...formData.assignments];
+    newAssign[assignIndex].questions = newAssign[assignIndex].questions.filter(
+      (_, i) => i !== qIndex,
+    );
+    setFormData({ ...formData, assignments: newAssign });
+  };
+
   return (
     <div className='animate-fade-in' style={{ paddingBottom: '3rem' }}>
+      <AlertModal
+        isOpen={alertInfo.isOpen}
+        onClose={() => {
+          setAlertInfo({ ...alertInfo, isOpen: false });
+          if (alertInfo.onClose) alertInfo.onClose();
+        }}
+        title={alertInfo.title}
+        message={alertInfo.message}
+        type={alertInfo.type}
+      />
+
       <button
         onClick={() => navigate('/courses')}
         style={{
@@ -188,14 +300,30 @@ const CourseForm = () => {
             />
           </div>
           <div className='form-group'>
-            <label className='form-label'>Thumbnail URL</label>
-            <input
-              className='input-field'
-              value={formData.thumbnail}
-              onChange={(e) =>
-                setFormData({ ...formData, thumbnail: e.target.value })
-              }
-            />
+            <label className='form-label'>Thumbnail</label>
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              <img
+                src={formData.thumbnail}
+                style={{
+                  width: '80px',
+                  height: '60px',
+                  objectFit: 'cover',
+                  borderRadius: '4px',
+                }}
+                alt=''
+              />
+              <label
+                className='btn btn-outline btn-sm'
+                style={{ cursor: 'pointer' }}>
+                <Upload size={14} /> Upload Thumbnail
+                <input
+                  type='file'
+                  hidden
+                  accept='image/*'
+                  onChange={handleThumbnailUpload}
+                />
+              </label>
+            </div>
           </div>
         </div>
 
@@ -220,12 +348,6 @@ const CourseForm = () => {
               <Plus size={14} /> Add Module
             </button>
           </div>
-
-          {formData.modules.length === 0 && (
-            <p className='text-center text-muted italic'>
-              No modules added yet.
-            </p>
-          )}
 
           {formData.modules.map((module, mIndex) => (
             <div
@@ -282,7 +404,6 @@ const CourseForm = () => {
                 </button>
               </div>
 
-              {/* Resources Section */}
               <div style={{ paddingLeft: '2.5rem' }}>
                 <div
                   style={{
@@ -312,6 +433,7 @@ const CourseForm = () => {
                         }>
                         <option value='video'>Video</option>
                         <option value='pdf'>PDF</option>
+                        <option value='ppt'>PPT</option>
                         <option value='link'>Link</option>
                       </select>
                       <input
@@ -328,15 +450,53 @@ const CourseForm = () => {
                           )
                         }
                       />
-                      <input
-                        className='input-field'
-                        style={{ padding: '0.4rem', fontSize: '0.8rem' }}
-                        placeholder='URL (e.g., https://...)'
-                        value={res.url}
-                        onChange={(e) =>
-                          updateResource(mIndex, rIndex, 'url', e.target.value)
-                        }
-                      />
+
+                      {res.type === 'link' || res.type === 'video' ? (
+                        <input
+                          className='input-field'
+                          style={{ padding: '0.4rem', fontSize: '0.8rem' }}
+                          placeholder='URL'
+                          value={res.url}
+                          onChange={(e) =>
+                            updateResource(
+                              mIndex,
+                              rIndex,
+                              'url',
+                              e.target.value,
+                            )
+                          }
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            display: 'flex',
+                            gap: '0.5rem',
+                            alignItems: 'center',
+                          }}>
+                          <input
+                            className='input-field'
+                            disabled
+                            value={res.url}
+                            style={{
+                              fontSize: '0.8rem',
+                              background: '#f1f5f9',
+                            }}
+                            placeholder='File URL'
+                          />
+                          <label
+                            className='btn btn-sm btn-outline'
+                            style={{ cursor: 'pointer' }}>
+                            <Upload size={12} /> Upload
+                            <input
+                              type='file'
+                              hidden
+                              onChange={(e) =>
+                                handleFileUpload(e, mIndex, rIndex)
+                              }
+                            />
+                          </label>
+                        </div>
+                      )}
                       <button
                         type='button'
                         onClick={() => deleteResource(mIndex, rIndex)}
@@ -350,6 +510,13 @@ const CourseForm = () => {
                       </button>
                     </div>
                   ))}
+                  {uploadProgress > 0 && (
+                    <div className='progress-track'>
+                      <div
+                        className='progress-fill-blue'
+                        style={{ width: `${uploadProgress}%` }}></div>
+                    </div>
+                  )}
                 </div>
                 <button
                   type='button'
@@ -390,11 +557,6 @@ const CourseForm = () => {
               <Plus size={14} /> Add Assignment
             </button>
           </div>
-          {formData.assignments.length === 0 && (
-            <p className='text-center text-muted italic'>
-              No assignments created.
-            </p>
-          )}
 
           {formData.assignments.map((assign, i) => (
             <div
@@ -429,16 +591,167 @@ const CourseForm = () => {
                 />
               </div>
               <div
-                style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
                 <input
+                  type='number'
                   className='input-field'
-                  placeholder='Description/Instructions'
-                  style={{ flex: 1 }}
-                  value={assign.description}
+                  placeholder='Time Limit (mins)'
+                  value={assign.timeLimit}
                   onChange={(e) =>
-                    updateAssignment(i, 'description', e.target.value)
+                    updateAssignment(i, 'timeLimit', parseInt(e.target.value))
                   }
                 />
+                <label
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: '600',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                  }}>
+                  <input
+                    type='checkbox'
+                    checked={assign.antiCheat}
+                    onChange={(e) =>
+                      updateAssignment(i, 'antiCheat', e.target.checked)
+                    }
+                  />
+                  Enable Anti-Cheat
+                </label>
+              </div>
+
+              {/* Question Builder */}
+              <div
+                style={{
+                  background: 'white',
+                  padding: '1rem',
+                  borderRadius: '8px',
+                  marginBottom: '1rem',
+                }}>
+                <h4 style={{ margin: '0 0 1rem 0', fontSize: '0.9rem' }}>
+                  Questions
+                </h4>
+                {assign.questions &&
+                  assign.questions.map((q, qIdx) => (
+                    <div
+                      key={qIdx}
+                      style={{
+                        marginBottom: '1rem',
+                        borderBottom: '1px solid #f1f5f9',
+                        paddingBottom: '1rem',
+                      }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: '0.5rem',
+                          marginBottom: '0.5rem',
+                        }}>
+                        <select
+                          className='input-field'
+                          style={{ width: '100px' }}
+                          value={q.type}
+                          onChange={(e) =>
+                            updateQuestion(i, qIdx, 'type', e.target.value)
+                          }>
+                          <option value='text'>Text</option>
+                          <option value='mcq'>MCQ</option>
+                        </select>
+                        <input
+                          className='input-field'
+                          placeholder='Question Text'
+                          value={q.questionText}
+                          onChange={(e) =>
+                            updateQuestion(
+                              i,
+                              qIdx,
+                              'questionText',
+                              e.target.value,
+                            )
+                          }
+                          style={{ flex: 1 }}
+                        />
+                        <input
+                          type='number'
+                          className='input-field'
+                          style={{ width: '80px' }}
+                          placeholder='Pts'
+                          value={q.points}
+                          onChange={(e) =>
+                            updateQuestion(i, qIdx, 'points', e.target.value)
+                          }
+                        />
+                        <button
+                          type='button'
+                          onClick={() => deleteQuestion(i, qIdx)}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            color: '#ef4444',
+                          }}>
+                          <Trash size={16} />
+                        </button>
+                      </div>
+                      {q.type === 'mcq' && (
+                        <div style={{ paddingLeft: '1rem' }}>
+                          {q.options.map((opt, oIdx) => (
+                            <div
+                              key={oIdx}
+                              style={{
+                                display: 'flex',
+                                gap: '0.5rem',
+                                marginBottom: '0.25rem',
+                              }}>
+                              <div
+                                style={{
+                                  width: '20px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                }}>
+                                •
+                              </div>
+                              <input
+                                className='input-field'
+                                style={{
+                                  padding: '0.25rem',
+                                  fontSize: '0.85rem',
+                                }}
+                                value={opt}
+                                onChange={(e) =>
+                                  updateOption(i, qIdx, oIdx, e.target.value)
+                                }
+                              />
+                            </div>
+                          ))}
+                          <button
+                            type='button'
+                            onClick={() => addOption(i, qIdx)}
+                            className='btn btn-sm btn-outline'
+                            style={{ marginTop: '0.5rem' }}>
+                            Add Option
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type='button'
+                    onClick={() => addQuestion(i, 'text')}
+                    className='btn btn-sm'
+                    style={{ background: '#f1f5f9' }}>
+                    <Plus size={12} /> Add Written Q
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => addQuestion(i, 'mcq')}
+                    className='btn btn-sm'
+                    style={{ background: '#f1f5f9' }}>
+                    <List size={12} /> Add MCQ
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button
                   type='button'
                   onClick={() => deleteAssignment(i)}
@@ -447,8 +760,11 @@ const CourseForm = () => {
                     background: 'none',
                     color: '#ef4444',
                     cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
                   }}>
-                  <Trash size={18} />
+                  <Trash size={16} /> Delete Assignment
                 </button>
               </div>
             </div>

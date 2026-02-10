@@ -24,6 +24,7 @@ const seedData = async () => {
         // Create Users
         const salt = await bcrypt.genSalt(10);
         const password = await bcrypt.hash('password123', salt);
+        const adminPassword = await bcrypt.hash(process.env.ADMIN_PASSWORD || 'admin123', salt);
 
         const teacher = await User.create({
             name: 'Dr. Bob Teacher',
@@ -42,11 +43,11 @@ const seedData = async () => {
         });
 
         const admin = await User.create({
-            name: 'Charlie Admin',
-            email: 'admin@edu.com',
-            password,
+            name: 'Admin User',
+            email: process.env.ADMIN_EMAIL || 'admin@edu.com',
+            password: adminPassword,
             role: 'ADMIN',
-            avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Charlie'
+            avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin'
         });
 
         console.log('Users Created');
@@ -65,15 +66,15 @@ const seedData = async () => {
                         id: 'm1',
                         title: 'Week 1: React Fundamentals',
                         resources: [
-                            { title: 'Intro to Components', type: 'video', url: '#' },
-                            { title: 'State & Props Guide', type: 'pdf', url: '#' }
+                            { title: 'Intro to Components', type: 'video', url: 'https://www.youtube.com/watch?v=Tn6-PIqc4UM' },
+                            { title: 'State & Props Guide', type: 'pdf', url: 'https://react.dev/learn' }
                         ]
                     },
                     {
                         id: 'm2',
                         title: 'Week 2: Advanced Hooks',
                         resources: [
-                            { title: 'UseEffect Deep Dive', type: 'video', url: '#' }
+                            { title: 'UseEffect Deep Dive', type: 'video', url: 'https://www.youtube.com/watch?v=0ZJgIjIuY7U' }
                         ]
                     }
                 ],

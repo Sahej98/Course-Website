@@ -1,23 +1,37 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
-  Download,
   Search,
   Trash2,
-  Edit,
-  Loader2,
   Plus,
   Users,
   BookOpen,
-  FileText,
-  BarChart2,
+  Edit2,
+  Upload,
+  X,
+  Check,
+  FileSpreadsheet,
 } from 'lucide-react';
-import { ConfirmModal, AlertModal } from '../components/CustomModals';
+import {
+  ConfirmModal,
+  AlertModal,
+  FormModal,
+} from '../components/CustomModals';
 import { useNavigate } from 'react-router-dom';
 
 const AdminPanel = () => {
-  const { fetchAllUsers, deleteUser, fetchAdminStats, fetchAdminCourses } =
-    useApp();
+  const {
+    fetchAllUsers,
+    deleteUser,
+    fetchAdminStats,
+    fetchAdminCourses,
+    adminCreateUser,
+    adminBulkCreateUsers,
+    adminUpdateUser,
+    deleteCourse,
+    uploadFile,
+    bulkCreateCourses,
+  } = useApp();
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -27,6 +41,7 @@ const AdminPanel = () => {
     engagement: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('users');
 
   // Modals
   const [confirm, setConfirm] = useState({
@@ -35,6 +50,20 @@ const AdminPanel = () => {
     onConfirm: () => {},
   });
   const [alert, setAlert] = useState({ isOpen: false, title: '', message: '' });
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+
+  // Forms
+  const [userForm, setUserForm] = useState({
+    id: null,
+    name: '',
+    email: '',
+    password: '',
+    role: 'STUDENT',
+    avatar: '',
+  });
+  const [bulkData, setBulkData] = useState('');
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -57,37 +86,146 @@ const AdminPanel = () => {
     }
   };
 
+  const handleEditUser = (user) => {
+    setUserForm({
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+      password: '', // Don't show password
+    });
+    setShowUserModal(true);
+  };
+
+  const handleCreateUserClick = () => {
+    setUserForm({
+      id: null,
+      name: '',
+      email: '',
+      password: '',
+      role: 'STUDENT',
+      avatar: '',
+    });
+    setShowUserModal(true);
+  };
+
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await uploadFile(file);
+      setUserForm({ ...userForm, avatar: res.url });
+    } catch (e) {
+      setAlert({
+        isOpen: true,
+        title: 'Error',
+        message: 'Failed to upload image',
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleUserSubmit = async () => {
+    try {
+      if (userForm.id) {
+        await adminUpdateUser(userForm.id, userForm);
+        setAlert({ isOpen: true, title: 'Success', message: 'User updated.' });
+      } else {
+        await adminCreateUser(userForm);
+        setAlert({ isOpen: true, title: 'Success', message: 'User created.' });
+      }
+      setShowUserModal(false);
+      loadData();
+    } catch (e) {
+      setAlert({ isOpen: true, title: 'Error', message: 'Operation failed.' });
+    }
+  };
+
+  const handleBulkSubmit = async () => {
+    try {
+      const parsed = JSON.parse(bulkData);
+      if (!Array.isArray(parsed))
+        throw new Error('Data must be an array of objects');
+
+      if (activeTab === 'users') {
+        await adminBulkCreateUsers(parsed);
+        setAlert({
+          isOpen: true,
+          title: 'Success',
+          message: 'Users imported successfully.',
+        });
+      } else {
+        await bulkCreateCourses(parsed);
+        setAlert({
+          isOpen: true,
+          title: 'Success',
+          message: 'Courses imported successfully.',
+        });
+      }
+      setShowBulkModal(false);
+      setBulkData('');
+      loadData();
+    } catch (e) {
+      setAlert({
+        isOpen: true,
+        title: 'Error',
+        message: 'Invalid JSON format or server error.',
+      });
+    }
+  };
+
+  const handleFileImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        // Simple CSV to JSON logic (Assumes headers on first row)
+        if (file.name.endsWith('.csv')) {
+          const csv = evt.target.result;
+          const lines = csv.split('\n');
+          const headers = lines[0].split(',').map((h) => h.trim());
+          const result = [];
+          for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            const obj = {};
+            const currentline = lines[i].split(',');
+            for (let j = 0; j < headers.length; j++) {
+              obj[headers[j]] = currentline[j]?.trim();
+            }
+            result.push(obj);
+          }
+          setBulkData(JSON.stringify(result, null, 2));
+        } else {
+          // Assume JSON
+          const json = JSON.parse(evt.target.result);
+          setBulkData(JSON.stringify(json, null, 2));
+        }
+      } catch (err) {
+        setAlert({
+          isOpen: true,
+          title: 'Error',
+          message: 'Failed to parse file.',
+        });
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleDeleteUser = (userId) => {
     setConfirm({
       isOpen: true,
-      message:
-        'Are you sure you want to delete this user? This cannot be undone.',
+      message: 'Are you sure you want to delete this user?',
       onConfirm: async () => {
-        try {
-          await deleteUser(userId);
-          setUsers(users.filter((u) => u._id !== userId));
-          setAlert({
-            isOpen: true,
-            title: 'Success',
-            message: 'User deleted.',
-          });
-        } catch (error) {
-          setAlert({
-            isOpen: true,
-            title: 'Error',
-            message: 'Failed to delete user.',
-          });
-        }
+        await deleteUser(userId);
+        setUsers(users.filter((u) => u._id !== userId));
       },
     });
   };
-
-  if (loading)
-    return (
-      <div className='flex justify-center p-8'>
-        <Loader2 className='animate-spin' />
-      </div>
-    );
 
   return (
     <div
@@ -104,21 +242,143 @@ const AdminPanel = () => {
         {...alert}
       />
 
-      <div>
-        <h1
-          style={{
-            fontSize: '2rem',
-            fontWeight: '800',
-            color: '#0f172a',
-            marginBottom: '0.5rem',
-          }}>
-          Admin Dashboard
-        </h1>
-        <p style={{ color: '#64748b' }}>
-          Manage users, courses, discussions, and site settings.
-        </p>
-      </div>
+      {/* User Modal */}
+      <FormModal
+        isOpen={showUserModal}
+        onClose={() => setShowUserModal(false)}
+        title={userForm.id ? 'Edit User' : 'Add New User'}
+        onSubmit={handleUserSubmit}>
+        <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+          <img
+            src={userForm.avatar || 'https://placehold.co/100'}
+            style={{
+              width: '80px',
+              height: '80px',
+              borderRadius: '50%',
+              objectFit: 'cover',
+              marginBottom: '0.5rem',
+            }}
+            alt=''
+          />
+          <br />
+          <label
+            className='btn btn-outline btn-sm'
+            style={{ cursor: 'pointer' }}>
+            {uploading ? (
+              'Uploading...'
+            ) : (
+              <>
+                <Upload size={14} /> Upload Photo
+              </>
+            )}
+            <input
+              type='file'
+              hidden
+              onChange={handleAvatarUpload}
+              accept='image/*'
+            />
+          </label>
+        </div>
+        <div className='form-group'>
+          <label className='form-label'>Name</label>
+          <input
+            className='input-field'
+            required
+            value={userForm.name}
+            onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+          />
+        </div>
+        <div className='form-group'>
+          <label className='form-label'>Email</label>
+          <input
+            className='input-field'
+            type='email'
+            required
+            value={userForm.email}
+            onChange={(e) =>
+              setUserForm({ ...userForm, email: e.target.value })
+            }
+          />
+        </div>
+        <div className='form-group'>
+          <label className='form-label'>
+            {userForm.id ? 'New Password (Optional)' : 'Password'}
+          </label>
+          <input
+            className='input-field'
+            type='password'
+            required={!userForm.id}
+            value={userForm.password}
+            onChange={(e) =>
+              setUserForm({ ...userForm, password: e.target.value })
+            }
+          />
+        </div>
+        <div className='form-group'>
+          <label className='form-label'>Role</label>
+          <select
+            className='input-field'
+            value={userForm.role}
+            onChange={(e) =>
+              setUserForm({ ...userForm, role: e.target.value })
+            }>
+            <option value='STUDENT'>Student</option>
+            <option value='TEACHER'>Instructor</option>
+            <option value='ADMIN'>Admin</option>
+          </select>
+        </div>
+        <button className='btn btn-primary w-full'>
+          {userForm.id ? 'Update User' : 'Create User'}
+        </button>
+      </FormModal>
 
+      {/* Bulk Import Modal */}
+      <FormModal
+        isOpen={showBulkModal}
+        onClose={() => setShowBulkModal(false)}
+        title={`Bulk Import ${activeTab === 'users' ? 'Users' : 'Courses'}`}
+        onSubmit={handleBulkSubmit}>
+        <div style={{ marginBottom: '1rem', textAlign: 'center' }}>
+          <label
+            className='btn btn-outline'
+            style={{ cursor: 'pointer', width: '100%' }}>
+            <FileSpreadsheet size={16} /> Upload CSV or JSON
+            <input
+              type='file'
+              hidden
+              accept='.json,.csv'
+              onChange={handleFileImport}
+            />
+          </label>
+          <p
+            style={{
+              fontSize: '0.8rem',
+              color: '#64748b',
+              marginTop: '0.5rem',
+            }}>
+            {activeTab === 'users'
+              ? 'Format: name, email, password, role'
+              : 'Format: title, description, thumbnail'}
+          </p>
+        </div>
+        <div className='form-group'>
+          <label className='form-label'>Or Paste JSON Data</label>
+          <textarea
+            className='textarea-field'
+            value={bulkData}
+            onChange={(e) => setBulkData(e.target.value)}
+            placeholder='[{"name": "John", "email": "..."}]'
+            style={{
+              minHeight: '200px',
+              fontFamily: 'monospace',
+              fontSize: '0.85rem',
+            }}
+          />
+        </div>
+        <button className='btn btn-primary w-full'>Import Data</button>
+      </FormModal>
+
+      {/* Admin Stats */}
       <div className='grid-4'>
         <div
           className='card'
@@ -200,41 +460,54 @@ const AdminPanel = () => {
             </div>
           </div>
         </div>
-        {/* ... other stats cards remain similar ... */}
       </div>
 
-      <div
-        className='grid-2'
-        style={{ gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+      {/* Tabs */}
+      <div className='tab-nav'>
+        <button
+          className={`tab-btn ${activeTab === 'users' ? 'active' : ''}`}
+          onClick={() => setActiveTab('users')}>
+          User Management
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'courses' ? 'active' : ''}`}
+          onClick={() => setActiveTab('courses')}>
+          Course Management
+        </button>
+      </div>
+
+      {/* Content */}
+      {activeTab === 'users' && (
         <div className='admin-table-container'>
-          <div
-            style={{
-              padding: '1.25rem',
-              borderBottom: '1px solid #e2e8f0',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}>
-            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>User Overview</h3>
-            <button
-              className='btn btn-primary btn-sm'
-              style={{ background: '#3b82f6' }}
-              onClick={() => navigate('/register')}>
-              <Plus size={14} /> Add User
-            </button>
+          <div className='admin-header'>
+            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>All Users</h3>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                className='btn btn-outline btn-sm'
+                onClick={() => setShowBulkModal(true)}>
+                <FileSpreadsheet size={14} /> Bulk Import
+              </button>
+              <button
+                className='btn btn-primary btn-sm'
+                onClick={handleCreateUserClick}>
+                <Plus size={14} /> Add User
+              </button>
+            </div>
           </div>
           <table className='admin-table'>
             <thead>
               <tr>
-                <th>Name</th>
+                <th>User</th>
+                <th>Email</th>
                 <th>Role</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {users.slice(0, 10).map((user) => (
+              {users.map((user) => (
                 <tr key={user._id}>
                   <td
+                    data-label='User'
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -243,72 +516,137 @@ const AdminPanel = () => {
                     <img
                       src={user.avatar}
                       style={{
-                        width: '28px',
-                        height: '28px',
+                        width: '32px',
+                        height: '32px',
                         borderRadius: '50%',
                       }}
                       alt=''
                     />
                     {user.name}
                   </td>
-                  <td>{user.role}</td>
-                  <td>
-                    <button
-                      onClick={() => handleDeleteUser(user._id)}
+                  <td data-label='Email'>{user.email}</td>
+                  <td data-label='Role'>
+                    <span
+                      className={`status-pill ${user.role === 'ADMIN' ? 'completed' : 'locked'}`}>
+                      {user.role}
+                    </span>
+                  </td>
+                  <td data-label='Action'>
+                    <div
                       style={{
-                        border: 'none',
-                        background: 'none',
-                        color: '#ef4444',
-                        cursor: 'pointer',
+                        display: 'flex',
+                        gap: '0.5rem',
+                        justifyContent: 'flex-end',
                       }}>
-                      <Trash2 size={16} />
-                    </button>
+                      <button
+                        onClick={() => handleEditUser(user)}
+                        style={{
+                          border: 'none',
+                          background: 'none',
+                          color: '#2563eb',
+                          cursor: 'pointer',
+                        }}>
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteUser(user._id)}
+                        style={{
+                          border: 'none',
+                          background: 'none',
+                          color: '#ef4444',
+                          cursor: 'pointer',
+                        }}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          <div className='admin-table-container'>
-            <div
-              style={{
-                padding: '1.25rem',
-                borderBottom: '1px solid #e2e8f0',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}>
-              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>
-                Course Management
-              </h3>
+      {activeTab === 'courses' && (
+        <div className='admin-table-container'>
+          <div className='admin-header'>
+            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>All Courses</h3>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                className='btn btn-outline btn-sm'
+                onClick={() => setShowBulkModal(true)}>
+                <FileSpreadsheet size={14} /> Bulk Import
+              </button>
               <button
                 className='btn btn-primary btn-sm'
-                style={{ background: '#16a34a' }}
                 onClick={() => navigate('/courses/new')}>
                 <Plus size={14} /> Add Course
               </button>
             </div>
-            <table className='admin-table'>
-              <thead>
-                <tr>
-                  <th>Course Name</th>
-                  <th>Students</th>
-                </tr>
-              </thead>
-              <tbody>
-                {courses.map((c, i) => (
-                  <tr key={i}>
-                    <td>{c.title}</td>
-                    <td>{c.studentCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
+          <table className='admin-table'>
+            <thead>
+              <tr>
+                <th>Thumbnail</th>
+                <th>Course Name</th>
+                <th>Instructor</th>
+                <th>Students</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {courses.map((c, i) => (
+                <tr key={i}>
+                  <td data-label='Thumbnail'>
+                    <img
+                      src={c.thumbnail}
+                      style={{
+                        width: '40px',
+                        height: '40px',
+                        borderRadius: '4px',
+                        objectFit: 'cover',
+                      }}
+                      alt=''
+                    />
+                  </td>
+                  <td data-label='Course'>{c.title}</td>
+                  <td data-label='Instructor'>{c.instructor}</td>
+                  <td data-label='Enrolled'>{c.studentCount}</td>
+                  <td data-label='Action'>
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: '0.5rem',
+                        justifyContent: 'flex-end',
+                      }}>
+                      <button
+                        onClick={() => navigate(`/courses/${c._id}/edit`)}
+                        style={{
+                          border: 'none',
+                          background: 'none',
+                          color: '#2563eb',
+                          cursor: 'pointer',
+                        }}>
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() => deleteCourse(c._id)}
+                        style={{
+                          border: 'none',
+                          background: 'none',
+                          color: '#ef4444',
+                          cursor: 'pointer',
+                        }}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
+      )}
     </div>
   );
 };

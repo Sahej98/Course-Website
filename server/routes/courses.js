@@ -29,9 +29,13 @@ router.get('/:id', protect, async (req, res) => {
     }
 });
 
-// Enroll in a course
+// Enroll in a course (Students only)
 router.post('/:id/enroll', protect, async (req, res) => {
     try {
+        if (req.user.role === 'TEACHER') {
+            return res.status(403).json({ message: 'Instructors cannot enroll in courses.' });
+        }
+
         const course = await Course.findById(req.params.id);
         if (!course) return res.status(404).json({ message: 'Course not found' });
 
@@ -50,7 +54,7 @@ router.post('/:id/enroll', protect, async (req, res) => {
 });
 
 // Create Course (Instructor/Admin only)
-router.post('/', protect, authorize('INSTRUCTOR', 'ADMIN'), async (req, res) => {
+router.post('/', protect, authorize('TEACHER', 'ADMIN'), async (req, res) => {
     try {
         // Automatically set instructor if not provided
         const courseData = {
@@ -66,8 +70,31 @@ router.post('/', protect, authorize('INSTRUCTOR', 'ADMIN'), async (req, res) => 
     }
 });
 
+// Bulk Import Courses
+router.post('/bulk', protect, authorize('TEACHER', 'ADMIN'), async (req, res) => {
+    try {
+        const courses = req.body; // Expects array of course objects
+        if (!Array.isArray(courses)) return res.status(400).json({ message: "Invalid data format. Expected array." });
+
+        const createdCourses = [];
+        for (const c of courses) {
+            const courseData = {
+                ...c,
+                instructor: req.user.name,
+                instructorId: req.user._id,
+                thumbnail: c.thumbnail || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80'
+            };
+            const newCourse = await Course.create(courseData);
+            createdCourses.push(newCourse);
+        }
+        res.status(201).json(createdCourses);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
 // Update Course
-router.put('/:id', protect, authorize('INSTRUCTOR', 'ADMIN'), async (req, res) => {
+router.put('/:id', protect, authorize('TEACHER', 'ADMIN'), async (req, res) => {
     try {
         const course = await Course.findById(req.params.id);
 
@@ -89,7 +116,7 @@ router.put('/:id', protect, authorize('INSTRUCTOR', 'ADMIN'), async (req, res) =
 });
 
 // Delete Course
-router.delete('/:id', protect, authorize('INSTRUCTOR', 'ADMIN'), async (req, res) => {
+router.delete('/:id', protect, authorize('TEACHER', 'ADMIN'), async (req, res) => {
     try {
         const course = await Course.findById(req.params.id);
         if (course) {

@@ -12,10 +12,17 @@ import {
   FileText,
   Users,
   MessageSquare,
+  PlayCircle,
+  ExternalLink,
+  CheckCircle,
+  ChevronDown,
+  ChevronRight,
+  AlertTriangle,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Forum from '../components/Forum';
 import QuizModal from '../components/QuizModal';
+import ActiveAssignment from '../components/ActiveAssignment';
 import {
   AlertModal,
   PromptModal,
@@ -31,13 +38,18 @@ const CourseDetail = () => {
     currentUser,
     enrollCourse,
     submitAssignment,
+    getUserSubmissions,
+    requestResubmission,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('modules');
   const [activeQuiz, setActiveQuiz] = useState(null);
+  const [activeAssignment, setActiveAssignment] = useState(null);
   const [enrolling, setEnrolling] = useState(false);
   const [currentCourse, setCurrentCourse] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [expandedModules, setExpandedModules] = useState({});
+  const [mySubmissions, setMySubmissions] = useState([]);
 
   // Modals state
   const [alertInfo, setAlertInfo] = useState({
@@ -46,12 +58,6 @@ const CourseDetail = () => {
     message: '',
     type: 'info',
   });
-  const [promptInfo, setPromptInfo] = useState({
-    isOpen: false,
-    title: '',
-    label: '',
-    onSubmit: () => {},
-  });
   const [confirmInfo, setConfirmInfo] = useState({
     isOpen: false,
     message: '',
@@ -59,30 +65,127 @@ const CourseDetail = () => {
   });
 
   useEffect(() => {
-    const loadCourse = async () => {
-      setIsLoading(true);
-      let foundCourse = courses.find((c) => c._id === id);
-
-      if (!foundCourse) {
-        try {
-          foundCourse = await fetchCourseById(id);
-        } catch (err) {
-          console.error('Course load error', err);
-        }
-      }
-      setCurrentCourse(foundCourse);
-      setIsLoading(false);
-    };
     loadCourse();
   }, [id, courses]);
 
-  const isEnrolled = currentUser?.enrolledCourses?.includes(currentCourse?._id);
+  const loadCourse = async () => {
+    setIsLoading(true);
+    let foundCourse = courses.find((c) => c._id === id);
+
+    if (!foundCourse) {
+      try {
+        foundCourse = await fetchCourseById(id);
+      } catch (err) {
+        console.error('Course load error', err);
+      }
+    }
+    setCurrentCourse(foundCourse);
+
+    if (currentUser && foundCourse) {
+      try {
+        const subs = await getUserSubmissions(foundCourse._id);
+        setMySubmissions(subs);
+      } catch (e) {}
+    }
+
+    if (foundCourse && foundCourse.modules.length > 0) {
+      setExpandedModules({ 0: true });
+    }
+    setIsLoading(false);
+  };
+
+  const isEnrolled = currentUser?.enrolledCourses?.some(
+    (cid) => String(cid) === String(currentCourse?._id),
+  );
   const isInstructor =
     currentUser?.role === 'TEACHER' || currentUser?.role === 'ADMIN';
 
   const showAlert = (title, message, type = 'info') =>
     setAlertInfo({ isOpen: true, title, message, type });
-  const closeAlert = () => setAlertInfo((prev) => ({ ...prev, isOpen: false }));
+
+  const handleAssignmentStart = (assign) => {
+    // Mobile Check for Anti-Cheat or General Assignment
+    const isMobile = window.innerWidth <= 768;
+
+    if (assign.antiCheat && isMobile) {
+      showAlert(
+        'Desktop Required',
+        'This assignment has anti-cheat enabled and must be taken on a desktop computer.',
+        'error',
+      );
+      return;
+    }
+
+    if (isMobile) {
+      // Warning for normal assignments on mobile
+      setConfirmInfo({
+        isOpen: true,
+        title: 'Mobile Warning',
+        message:
+          'It is recommended to take assignments on a desktop for the best experience. Continue anyway?',
+        onConfirm: () => startAssignmentProcess(assign),
+      });
+      return;
+    }
+
+    startAssignmentProcess(assign);
+  };
+
+  const startAssignmentProcess = (assign) => {
+    const fullAssignment = {
+      ...assign,
+      questions: assign.questions || [],
+    };
+
+    const sub = mySubmissions.find((s) => s.assignmentId === assign.id);
+    if (sub && sub.status !== 'pending') {
+      showAlert('Status', 'You have already submitted this assignment.');
+      return;
+    }
+    setActiveAssignment(fullAssignment);
+  };
+
+  const handleAssignmentSubmit = async (content, force = false) => {
+    try {
+      const payloadContent = content.content;
+      const payloadAnswers = content.answers;
+
+      await submitAssignment(
+        currentCourse._id,
+        activeAssignment.id,
+        payloadContent,
+        payloadAnswers,
+      );
+      showAlert('Success', 'Assignment submitted successfully!', 'success');
+      setActiveAssignment(null);
+      // Refresh submissions
+      const subs = await getUserSubmissions(currentCourse._id);
+      setMySubmissions(subs);
+    } catch (e) {
+      showAlert('Error', 'Submission failed', 'error');
+    }
+  };
+
+  const handleRequestResubmit = async (assign) => {
+    const sub = mySubmissions.find((s) => s.assignmentId === assign.id);
+    if (!sub) return;
+    try {
+      await requestResubmission(sub._id);
+      showAlert(
+        'Success',
+        'Resubmission request sent to instructor.',
+        'success',
+      );
+      const subs = await getUserSubmissions(currentCourse._id);
+      setMySubmissions(subs);
+    } catch (e) {
+      showAlert('Error', 'Request failed', 'error');
+    }
+  };
+
+  const toggleModule = (idx) => {
+    setExpandedModules((prev) => ({ ...prev, [idx]: !prev[idx] }));
+  };
 
   const handleEnroll = async () => {
     setEnrolling(true);
@@ -90,78 +193,14 @@ const CourseDetail = () => {
       await enrollCourse(currentCourse._id);
       showAlert(
         'Success',
-        'You have successfully enrolled in the course!',
+        'You have successfully enrolled! Start learning below.',
         'success',
       );
     } catch (error) {
-      showAlert('Error', 'Failed to enroll in the course.', 'error');
+      showAlert('Error', 'Failed to enroll.', 'error');
     } finally {
       setEnrolling(false);
     }
-  };
-
-  const handleMessageInstructor = () => {
-    setPromptInfo({
-      isOpen: true,
-      title: 'Message Instructor',
-      label: 'Your Message:',
-      placeholder: 'Type your message here...',
-      onSubmit: (val) => {
-        if (!val.trim()) return;
-        // Mock sending message
-        showAlert(
-          'Message Sent',
-          'Your message has been sent to the instructor.',
-          'success',
-        );
-      },
-    });
-  };
-
-  const handleStartQuiz = (quiz) => {
-    if (!isEnrolled && !isInstructor) {
-      showAlert(
-        'Access Denied',
-        'You must be enrolled to take this quiz.',
-        'error',
-      );
-      return;
-    }
-    setConfirmInfo({
-      isOpen: true,
-      message: `Are you ready to start "${quiz.title}"?`,
-      onConfirm: () => setActiveQuiz(quiz),
-    });
-  };
-
-  const handleSubmitAssignment = (assign) => {
-    if (!isEnrolled && !isInstructor) {
-      showAlert(
-        'Access Denied',
-        'Enroll in the course to submit assignments.',
-        'error',
-      );
-      return;
-    }
-    setPromptInfo({
-      isOpen: true,
-      title: `Submit: ${assign.title}`,
-      label: 'Paste your work or link:',
-      placeholder: 'https://docs.google.com/...',
-      onSubmit: async (val) => {
-        if (!val) return;
-        try {
-          await submitAssignment(currentCourse._id, assign.id, val);
-          showAlert(
-            'Submitted',
-            'Assignment submitted successfully!',
-            'success',
-          );
-        } catch (e) {
-          showAlert('Error', 'Submission failed. Please try again.', 'error');
-        }
-      },
-    });
   };
 
   if (isLoading)
@@ -177,23 +216,27 @@ const CourseDetail = () => {
       </div>
     );
 
+  if (activeAssignment) {
+    return (
+      <ActiveAssignment
+        assignment={activeAssignment}
+        onSubmit={handleAssignmentSubmit}
+        onCancel={() => setActiveAssignment(null)}
+      />
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       style={{ paddingBottom: '2.5rem' }}>
-      {/* Modals */}
       <AlertModal
         isOpen={alertInfo.isOpen}
-        onClose={closeAlert}
+        onClose={() => setAlertInfo({ ...alertInfo, isOpen: false })}
         title={alertInfo.title}
         message={alertInfo.message}
         type={alertInfo.type}
-      />
-      <PromptModal
-        isOpen={promptInfo.isOpen}
-        onClose={() => setPromptInfo((prev) => ({ ...prev, isOpen: false }))}
-        {...promptInfo}
       />
       <ConfirmModal
         isOpen={confirmInfo.isOpen}
@@ -204,349 +247,401 @@ const CourseDetail = () => {
         <QuizModal quiz={activeQuiz} onClose={() => setActiveQuiz(null)} />
       )}
 
-      {/* Breadcrumb */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '1.5rem',
-        }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.875rem',
-            color: '#64748b',
-          }}>
-          <Link
-            to='/courses'
-            style={{ textDecoration: 'none', color: 'inherit' }}>
-            My Courses
-          </Link>
-          <span>›</span>
-          <span style={{ color: '#0f172a', fontWeight: '600' }}>
-            {currentCourse.title}
-          </span>
-        </div>
-        <button
-          onClick={() => navigate('/courses')}
-          className='btn btn-primary'
-          style={{ padding: '0.5rem 1rem', background: '#f97316' }}>
-          <ArrowLeft size={16} /> Back to Courses
-        </button>
-      </div>
-
-      {/* Banner */}
       <div className='course-banner-new'>
-        <div className='banner-monitor'>
-          <img
-            src='https://cdni.iconscout.com/illustration/premium/thumb/web-development-2974925-2477356.png'
-            alt='Monitor'
-            style={{ width: '100%', objectFit: 'contain' }}
-          />
-        </div>
         <div className='banner-text' style={{ flex: 1 }}>
+          <button
+            onClick={() => navigate('/courses')}
+            className='btn btn-outline btn-sm'
+            style={{
+              marginBottom: '1rem',
+              border: 'none',
+              paddingLeft: 0,
+              color: '#64748b',
+            }}>
+            <ArrowLeft size={16} /> Back to Courses
+          </button>
+          <h1
+            style={{
+              margin: '0 0 0.5rem 0',
+              fontSize: '2.5rem',
+              color: '#dc2626',
+            }}>
+            {currentCourse.title}
+          </h1>
+          <p
+            style={{
+              fontSize: '1.1rem',
+              color: '#475569',
+              marginBottom: '1.5rem',
+              maxWidth: '700px',
+            }}>
+            {currentCourse.description ||
+              'No description available for this course.'}
+          </p>
+
           <div
             style={{
               display: 'flex',
-              alignItems: 'center',
               gap: '1rem',
-              marginBottom: '0.5rem',
+              alignItems: 'center',
+              flexWrap: 'wrap',
             }}>
-            <h1 style={{ margin: 0 }}>{currentCourse.title}</h1>
-          </div>
-          <div className='banner-badge'>
-            <Clock size={14} /> {isEnrolled ? 'In Progress' : 'Not Enrolled'}
-          </div>
-          <div style={{ marginTop: '1.5rem' }}>
-            <p style={{ margin: 0, fontWeight: '600', color: '#0f172a' }}>
-              Instructor:{' '}
-              <span style={{ fontSize: '1.1rem' }}>
-                {currentCourse.instructor}
-              </span>
-            </p>
+            <div className='banner-badge'>
+              <Clock size={16} /> {isEnrolled ? 'In Progress' : 'Not Enrolled'}
+            </div>
+            {!isEnrolled && !isInstructor && (
+              <button
+                onClick={handleEnroll}
+                className='btn btn-primary'
+                style={{ marginLeft: 'auto' }}>
+                {enrolling ? 'Enrolling...' : 'Start Learning Now'}
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className='tab-nav'>
-        {['overview', 'materials', 'assignments', 'quizzes', 'discussions'].map(
-          (tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
-              style={{ textTransform: 'capitalize' }}>
-              {tab}
-            </button>
-          ),
-        )}
-      </div>
-
-      {/* Content */}
-      {activeTab === 'overview' && (
-        <div className='course-overview-grid'>
+      <div
+        className='forum-layout'
+        style={{
+          alignItems: 'start',
+          gridTemplateColumns: activeTab === 'discussion' ? '1fr' : undefined,
+        }}>
+        <div>
           <div
-            style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div
-              className='card'
-              style={{ background: '#f8fafc', border: 'none' }}>
-              <h4 style={{ margin: '0 0 1rem 0' }}>Course Status</h4>
-              <div
-                style={{
-                  background: '#fef3c7',
-                  color: '#b45309',
-                  padding: '0.5rem',
-                  borderRadius: '8px',
-                  textAlign: 'center',
-                  fontWeight: 'bold',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.5rem',
-                }}>
-                <Clock size={16} />{' '}
-                {isEnrolled ? 'In Progress' : 'Not Enrolled'}
-              </div>
-              {!isEnrolled && !isInstructor && (
-                <button
-                  onClick={handleEnroll}
-                  className='btn btn-primary w-full'
-                  style={{ marginTop: '1rem' }}>
-                  {enrolling ? 'Enrolling...' : 'Enroll Now'}
-                </button>
-              )}
-            </div>
-            <div className='instructor-card'>
-              <h4 style={{ margin: '0 0 1rem 0', textAlign: 'left' }}>
-                Instructor
-              </h4>
-              <img
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCourse.instructor}`}
-                alt='Instructor'
-                className='instructor-avatar'
-              />
-              <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>
-                {currentCourse.instructor}
-              </div>
-              <button
-                className='btn btn-primary w-full'
-                style={{
-                  fontSize: '0.8rem',
-                  background: '#1e40af',
-                  marginTop: '1rem',
-                }}
-                onClick={handleMessageInstructor}>
-                Message Instructor
-              </button>
-            </div>
+            style={{
+              display: 'flex',
+              borderBottom: '1px solid #e2e8f0',
+              marginBottom: '1.5rem',
+            }}>
+            <button
+              onClick={() => setActiveTab('modules')}
+              className={`tab-btn ${activeTab === 'modules' ? 'active' : ''}`}>
+              Modules & Materials
+            </button>
+            <button
+              onClick={() => setActiveTab('assignments')}
+              className={`tab-btn ${activeTab === 'assignments' ? 'active' : ''}`}>
+              Assignments
+            </button>
+            <button
+              onClick={() => setActiveTab('discussion')}
+              className={`tab-btn ${activeTab === 'discussion' ? 'active' : ''}`}>
+              Discussion Forum
+            </button>
           </div>
 
-          <div>
-            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>
-              Course Curriculum
-            </h3>
-            {currentCourse.modules && currentCourse.modules.length > 0 ? (
-              currentCourse.modules.map((module, idx) => (
-                <div key={idx} className='curriculum-row'>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <div className='week-label'>Module {idx + 1}</div>
-                    <div style={{ fontWeight: '600', color: '#0f172a' }}>
-                      {module.title}
-                    </div>
-                  </div>
+          {activeTab === 'modules' && (
+            <div className='learning-path-container'>
+              <h3 style={{ marginBottom: '1rem', color: '#334155' }}>
+                Course Materials
+              </h3>
+              {currentCourse.modules && currentCourse.modules.length > 0 ? (
+                currentCourse.modules.map((module, idx) => (
                   <div
+                    key={idx}
+                    className='module-accordion'
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '1rem',
+                      marginBottom: '1rem',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      background: 'white',
                     }}>
-                    {isEnrolled || isInstructor ? (
-                      <button
-                        className='btn btn-primary btn-sm'
-                        style={{ background: '#1e40af' }}
-                        onClick={() => setActiveTab('materials')}>
-                        View
-                      </button>
-                    ) : (
-                      <button
-                        className='btn btn-outline btn-sm'
-                        onClick={() =>
-                          showAlert(
-                            'Locked',
-                            'Enroll to view content.',
-                            'error',
-                          )
-                        }>
-                        <Lock size={12} /> Locked
-                      </button>
+                    <div
+                      onClick={() => toggleModule(idx)}
+                      style={{
+                        padding: '1.25rem',
+                        background: '#f8fafc',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontWeight: '700',
+                      }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.75rem',
+                        }}>
+                        <div
+                          style={{
+                            background: '#dc2626',
+                            color: 'white',
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '0.8rem',
+                          }}>
+                          {idx + 1}
+                        </div>
+                        {module.title}
+                      </div>
+                      {expandedModules[idx] ? (
+                        <ChevronDown size={20} color='#64748b' />
+                      ) : (
+                        <ChevronRight size={20} color='#64748b' />
+                      )}
+                    </div>
+                    {expandedModules[idx] && (
+                      <div style={{ padding: '0' }}>
+                        {module.resources && module.resources.length > 0 ? (
+                          module.resources.map((res, rIdx) => (
+                            <div
+                              key={rIdx}
+                              style={{
+                                padding: '1rem 1.5rem',
+                                borderTop: '1px solid #f1f5f9',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                              }}
+                              className='resource-item'>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '1rem',
+                                }}>
+                                {res.type === 'video' ? (
+                                  <Video size={18} color='#2563eb' />
+                                ) : (
+                                  <FileText size={18} color='#f97316' />
+                                )}
+                                <div>
+                                  <div
+                                    style={{
+                                      fontSize: '0.95rem',
+                                      fontWeight: '500',
+                                      color: '#334155',
+                                    }}>
+                                    {res.title}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: '0.75rem',
+                                      color: '#94a3b8',
+                                      textTransform: 'capitalize',
+                                    }}>
+                                    {res.type} Resource
+                                  </div>
+                                </div>
+                              </div>
+                              {isEnrolled || isInstructor ? (
+                                <button
+                                  onClick={() => window.open(res.url, '_blank')}
+                                  className='btn btn-sm btn-outline'
+                                  style={{
+                                    borderRadius: '99px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                  }}>
+                                  {res.type === 'link'
+                                    ? 'Open Link'
+                                    : 'Download / View'}{' '}
+                                  <ExternalLink size={12} />
+                                </button>
+                              ) : (
+                                <Lock size={16} color='#cbd5e1' />
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          <div
+                            style={{
+                              padding: '1.5rem',
+                              color: '#94a3b8',
+                              fontStyle: 'italic',
+                              textAlign: 'center',
+                            }}>
+                            No resources.
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
+                ))
+              ) : (
+                <div
+                  style={{
+                    padding: '2rem',
+                    textAlign: 'center',
+                    color: '#94a3b8',
+                  }}>
+                  No modules added yet.
                 </div>
-              ))
-            ) : (
-              <div className='text-center p-8 text-muted border-dashed border rounded'>
-                No curriculum modules added.
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
+          {activeTab === 'assignments' && (
+            <div className='learning-path-container'>
+              <h3 style={{ margin: '0 0 1rem 0', color: '#334155' }}>
+                Assignments
+              </h3>
+              {currentCourse.assignments &&
+                currentCourse.assignments.map((assign, i) => {
+                  const sub = mySubmissions.find(
+                    (s) => s.assignmentId === assign.id,
+                  );
+                  const isSubmitted =
+                    sub &&
+                    (sub.status === 'submitted' || sub.status === 'graded');
+
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        padding: '1rem',
+                        background: 'white',
+                        borderRadius: '12px',
+                        border: '1px solid #e2e8f0',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '1rem',
+                      }}>
+                      <div>
+                        <div style={{ fontWeight: '600', color: '#1e293b' }}>
+                          {assign.title}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                          Due: {assign.dueDate}{' '}
+                          {assign.timeLimit > 0 && `• ${assign.timeLimit} mins`}
+                        </div>
+                        {sub && (
+                          <div
+                            style={{
+                              fontSize: '0.8rem',
+                              color:
+                                sub.status === 'graded' ? '#16a34a' : '#2563eb',
+                              marginTop: '0.25rem',
+                              fontWeight: 'bold',
+                            }}>
+                            Status: {sub.status.toUpperCase()}{' '}
+                            {sub.grade !== null &&
+                              `(${sub.grade}/${assign.totalPoints})`}
+                            {sub.resubmissionRequested && (
+                              <span
+                                style={{
+                                  color: '#ea580c',
+                                  marginLeft: '0.5rem',
+                                }}>
+                                • Resubmission Requested
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        {isSubmitted &&
+                          !sub.resubmissionRequested &&
+                          sub.status !== 'pending' && (
+                            <button
+                              className='btn btn-outline btn-sm'
+                              onClick={() => handleRequestResubmit(assign)}>
+                              Request Resubmit
+                            </button>
+                          )}
+                        <button
+                          className='btn btn-primary btn-sm'
+                          onClick={() => handleAssignmentStart(assign)}
+                          disabled={
+                            (!isEnrolled && !isInstructor) ||
+                            (isSubmitted && sub.status !== 'pending')
+                          }
+                          style={
+                            (!isEnrolled && !isInstructor) ||
+                            (isSubmitted && sub.status !== 'pending')
+                              ? {
+                                  background: '#e2e8f0',
+                                  color: '#94a3b8',
+                                  border: 'none',
+                                }
+                              : {}
+                          }>
+                          {isSubmitted && sub.status !== 'pending'
+                            ? 'Completed'
+                            : 'Start'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+              {currentCourse.quizzes &&
+                currentCourse.quizzes.map((quiz, i) => (
+                  <div
+                    key={`q-${i}`}
+                    style={{
+                      padding: '1rem',
+                      background: 'white',
+                      borderRadius: '12px',
+                      border: '1px solid #e2e8f0',
+                      marginBottom: '1rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}>
+                    <div>
+                      <div style={{ fontWeight: '600', color: '#1e293b' }}>
+                        {quiz.title}
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                        Quiz • {quiz.questions.length} Questions
+                      </div>
+                    </div>
+                    <button
+                      className='btn btn-primary btn-sm'
+                      style={{ background: '#059669', borderColor: '#059669' }}
+                      onClick={() => (isEnrolled ? setActiveQuiz(quiz) : null)}
+                      disabled={!isEnrolled && !isInstructor}>
+                      Take Quiz
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {activeTab === 'discussion' && <Forum courseId={currentCourse._id} />}
+        </div>
+
+        {activeTab !== 'discussion' && (
           <div
             style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div className='card'>
-              <h4 style={{ margin: '0 0 1rem 0' }}>Progress</h4>
+              <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>
+                Instructor
+              </h3>
               <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.75rem',
-                }}>
-                <div
+                style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <img
+                  src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCourse.instructor}`}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    fontSize: '0.9rem',
-                  }}>
-                  <FileText size={16} color='#f97316' />{' '}
-                  <span style={{ fontWeight: '600' }}>
-                    {currentCourse.assignments?.length}
-                  </span>{' '}
-                  Assignments
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    fontSize: '0.9rem',
-                  }}>
-                  <Award size={16} color='#16a34a' />{' '}
-                  <span style={{ fontWeight: '600' }}>
-                    {currentCourse.quizzes?.length}
-                  </span>{' '}
-                  Quizzes
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    background: '#f1f5f9',
+                  }}
+                  alt=''
+                />
+                <div>
+                  <div style={{ fontWeight: '700' }}>
+                    {currentCourse.instructor}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* DISCUSSIONS TAB */}
-      {activeTab === 'discussions' && <Forum courseId={currentCourse._id} />}
-
-      {/* ASSIGNMENTS TAB */}
-      {activeTab === 'assignments' && (
-        <div className='card'>
-          <h3 style={{ marginBottom: '1.5rem' }}>Assignments</h3>
-          {currentCourse.assignments?.map((a, i) => (
-            <div key={i} className='assignment-item'>
-              <div
-                className='assign-icon'
-                style={{ background: '#eff6ff', color: '#3b82f6' }}>
-                <FileText size={24} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>
-                  {a.title}
-                </div>
-                <div style={{ fontSize: '0.9rem', color: '#64748b' }}>
-                  {a.description || 'No description'}
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.8rem',
-                    color: '#94a3b8',
-                    marginTop: '0.25rem',
-                  }}>
-                  Due: {a.dueDate}
-                </div>
-              </div>
-              <button
-                className='btn btn-primary btn-sm'
-                onClick={() => handleSubmitAssignment(a)}>
-                Submit
-              </button>
-            </div>
-          ))}
-          {(!currentCourse.assignments ||
-            currentCourse.assignments.length === 0) && (
-            <div className='text-center text-muted'>No assignments.</div>
-          )}
-        </div>
-      )}
-
-      {/* QUIZZES TAB */}
-      {activeTab === 'quizzes' && (
-        <div className='card'>
-          <h3 style={{ marginBottom: '1.5rem' }}>Quizzes</h3>
-          {currentCourse.quizzes?.map((q, i) => (
-            <div key={i} className='assignment-item'>
-              <div
-                className='assign-icon'
-                style={{ background: '#dcfce7', color: '#16a34a' }}>
-                <Award size={24} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>
-                  {q.title}
-                </div>
-                <div style={{ fontSize: '0.9rem', color: '#64748b' }}>
-                  {q.questions?.length} Questions • {q.totalPoints} Points
-                </div>
-              </div>
-              <button
-                className='btn btn-primary btn-sm'
-                style={{ background: '#16a34a' }}
-                onClick={() => handleStartQuiz(q)}>
-                Start Quiz
-              </button>
-            </div>
-          ))}
-          {(!currentCourse.quizzes || currentCourse.quizzes.length === 0) && (
-            <div className='text-center text-muted'>No quizzes.</div>
-          )}
-        </div>
-      )}
-
-      {/* MATERIALS TAB */}
-      {activeTab === 'materials' && (
-        <div className='grid-3'>
-          {currentCourse.modules?.map((m) =>
-            m.resources?.map((r, i) => (
-              <div
-                key={i}
-                className='card p-4 flex items-center gap-3'
-                style={{ cursor: 'pointer' }}
-                onClick={() => window.open(r.url, '_blank')}>
-                <div className='p-2 bg-blue-50 text-blue-600 rounded'>
-                  {r.type === 'video' ? (
-                    <Video size={20} />
-                  ) : (
-                    <File size={20} />
-                  )}
-                </div>
-                <div>
-                  <div className='font-bold'>{r.title}</div>
-                  <div className='text-xs text-muted capitalize'>
-                    {r.type} (Click to Open)
-                  </div>
-                </div>
-              </div>
-            )),
-          )}
-          {(!currentCourse.modules ||
-            currentCourse.modules.every((m) => m.resources.length === 0)) && (
-            <div className='text-center text-muted col-span-3'>
-              No materials available.
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </motion.div>
   );
 };

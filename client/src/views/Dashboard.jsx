@@ -1,130 +1,159 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
-  Clock,
   BookOpen,
-  HelpCircle,
   ChevronRight,
-  Bell,
-  Flame,
   FileText,
   Calendar,
-  CheckCircle2,
   Trophy,
   AlertCircle,
+  Users,
+  CheckSquare,
+  TrendingUp,
+  Plus,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 
 const Dashboard = () => {
-  const { courses, currentUser, getAllMySubmissions, fetchThreads } = useApp();
+  const {
+    courses,
+    currentUser,
+    getAllMySubmissions,
+    fetchAnalytics,
+    loading: appLoading,
+  } = useApp();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
 
-  // State for real dashboard metrics
-  const [metrics, setMetrics] = useState({
-    pendingCount: 0,
-    activeCourses: 0,
-    avgScore: 0,
-    upcomingTasks: [],
-    recentThreads: [],
-    completionRate: 0,
+  // Dashboard Metrics
+  const [stats, setStats] = useState({
+    card1: { label: '', value: 0, icon: BookOpen, color: 'blue' },
+    card2: { label: '', value: 0, icon: AlertCircle, color: 'orange' },
+    card3: { label: '', value: 0, icon: Trophy, color: 'green' },
+    card4: { label: '', value: 0, icon: Calendar, color: 'red' },
+    mainList: [],
+    sideList: [],
   });
 
-  const isInstructor =
-    currentUser.role === 'TEACHER' || currentUser.role === 'ADMIN';
+  const isStudent = currentUser?.role === 'STUDENT';
+  const isAdmin = currentUser?.role === 'ADMIN';
 
   useEffect(() => {
+    // Wait for the main app to finish initial loading (auth check)
+    if (appLoading) return;
+
     const loadData = async () => {
       try {
-        // 1. Identify My Courses
-        const myCourses = isInstructor
-          ? courses.filter((c) => c.instructorId === currentUser._id)
-          : courses.filter(
-              (c) =>
-                currentUser.enrolledCourses &&
-                currentUser.enrolledCourses.includes(c._id),
-            );
+        // Fetch real analytics from backend to get accurate aggregate data
+        const analyticsData = await fetchAnalytics();
 
-        // 2. Fetch all my submissions to determine status
-        let mySubmissions = [];
-        if (!isInstructor) {
-          mySubmissions = await getAllMySubmissions();
-        }
+        if (isStudent) {
+          // --- STUDENT LOGIC ---
+          // Only show enrolled courses
+          const myCourses = courses.filter((c) =>
+            currentUser.enrolledCourses?.includes(c._id),
+          );
+          const mySubmissions = await getAllMySubmissions();
 
-        // 3. Calculate Pending Assignments & Upcoming Tasks
-        let allAssignments = [];
-        let submittedCount = 0;
-        let gradedCount = 0;
-        let totalScore = 0;
+          // Calculate Stats based on real data
+          let pendingCount = 0;
+          let upcomingTasks = [];
 
-        myCourses.forEach((c) => {
-          c.assignments.forEach((a) => {
-            // Check status
-            const sub = mySubmissions.find(
-              (s) => s.assignmentId === a.id && s.courseId === c._id,
-            );
-            const isSubmitted = !!sub;
-            const isGraded = sub && sub.status === 'graded';
-
-            if (isSubmitted) submittedCount++;
-            if (isGraded) {
-              gradedCount++;
-              totalScore += sub.grade || 0;
-            }
-
-            if (!isSubmitted) {
-              allAssignments.push({
-                title: a.title,
-                dueDate: a.dueDate,
-                courseTitle: c.title,
-                icon: FileText,
-                color: '#3b82f6', // Default blue
-              });
-            }
+          myCourses.forEach((c) => {
+            c.assignments.forEach((a) => {
+              const sub = mySubmissions.find(
+                (s) => s.assignmentId === a.id && s.courseId === c._id,
+              );
+              if (!sub) {
+                pendingCount++;
+                upcomingTasks.push({
+                  ...a,
+                  courseTitle: c.title,
+                  courseId: c._id,
+                });
+              }
+            });
           });
-        });
 
-        // Sort by due date
-        allAssignments.sort(
-          (a, b) => new Date(a.dueDate) - new Date(b.dueDate),
-        );
+          upcomingTasks.sort(
+            (a, b) => new Date(a.dueDate) - new Date(b.dueDate),
+          );
 
-        // 4. Fetch recent forum threads (Global or first course)
-        let threads = [];
-        if (myCourses.length > 0) {
-          threads = await fetchThreads(myCourses[0]._id);
+          setStats({
+            card1: {
+              label: 'Enrolled Courses',
+              value: analyticsData.activeCourses || myCourses.length,
+              icon: BookOpen,
+              color: 'blue',
+            },
+            card2: {
+              label: 'Pending Tasks',
+              value: pendingCount,
+              icon: AlertCircle,
+              color: 'orange',
+            },
+            card3: {
+              label: 'Average Grade',
+              value: analyticsData.avgGrade + '%',
+              icon: Trophy,
+              color: 'green',
+            },
+            card4: {
+              label: 'Completion Rate',
+              value: analyticsData.completionRate + '%',
+              icon: CheckSquare,
+              color: 'red',
+            },
+            mainList: myCourses, // Only enrolled
+            sideList: upcomingTasks.slice(0, 5),
+          });
         } else {
-          threads = await fetchThreads('all');
-        }
+          // --- INSTRUCTOR / ADMIN LOGIC ---
+          // Filter logic handled in analytics endpoint, here we just filter list for display
+          const myTeachingCourses = isAdmin
+            ? courses // Admin sees all
+            : courses.filter((c) => c.instructorId === currentUser._id); // Teacher sees own
 
-        setMetrics({
-          pendingCount: allAssignments.length,
-          activeCourses: myCourses.length,
-          avgScore: gradedCount > 0 ? Math.round(totalScore / gradedCount) : 0,
-          upcomingTasks: allAssignments.slice(0, 5), // Top 5 upcoming
-          recentThreads: threads.slice(0, 3),
-          completionRate:
-            allAssignments.length + submittedCount > 0
-              ? Math.round(
-                  (submittedCount / (allAssignments.length + submittedCount)) *
-                    100,
-                )
-              : 0,
-        });
+          setStats({
+            card1: {
+              label: 'Total Courses',
+              value: analyticsData.totalCourses || myTeachingCourses.length,
+              icon: BookOpen,
+              color: 'blue',
+            },
+            card2: {
+              label: 'Total Students',
+              value: analyticsData.activeUsers || 0,
+              icon: Users,
+              color: 'green',
+            },
+            card3: {
+              label: 'Submissions',
+              value: analyticsData.totalSubmissions || 0,
+              icon: FileText,
+              color: 'orange',
+            },
+            card4: {
+              label: 'Avg Engagement',
+              value: (analyticsData.engagement || 0) + '%',
+              icon: TrendingUp,
+              color: 'red',
+            },
+            mainList: myTeachingCourses,
+            sideList: [],
+          });
+        }
       } catch (error) {
         console.error('Dashboard load error', error);
       } finally {
-        setLoading(false);
+        setDashboardLoading(false);
       }
     };
 
-    if (courses.length > 0 || !loading) {
-      loadData();
-    }
-  }, [courses, currentUser]);
+    loadData();
+  }, [courses, currentUser, appLoading]);
 
-  if (loading)
+  if (appLoading || dashboardLoading)
     return (
       <div className='flex justify-center p-12 text-muted'>
         Loading dashboard...
@@ -133,7 +162,7 @@ const Dashboard = () => {
 
   return (
     <div className='animate-fade-in' style={{ paddingBottom: '2rem' }}>
-      {/* 1. Welcome Banner */}
+      {/* Welcome Banner */}
       <div className='welcome-banner'>
         <div className='banner-content'>
           <h1
@@ -144,249 +173,240 @@ const Dashboard = () => {
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
             }}>
-            Welcome back, {currentUser.name.split(' ')[0]}!
+            {isStudent
+              ? 'Welcome Back,'
+              : isAdmin
+                ? 'Admin Dashboard,'
+                : 'Instructor Dashboard,'}{' '}
+            {currentUser.name.split(' ')[0]}
           </h1>
           <p
             style={{ fontSize: '1.1rem', color: '#64748b', maxWidth: '500px' }}>
-            {metrics.pendingCount > 0
-              ? `You have ${metrics.pendingCount} assignments pending. Keep up the momentum!`
-              : "You're all caught up! Great job."}
+            {isStudent
+              ? `You have ${stats.card2.value} assignments pending. Stay on track!`
+              : isAdmin
+                ? 'Overview of system performance and user statistics.'
+                : 'Manage your courses, track student progress, and grade assignments.'}
           </p>
-          <button
-            className='btn btn-primary'
-            style={{ marginTop: '1rem' }}
-            onClick={() => navigate('/assignments')}>
-            View Assignments <ChevronRight size={16} />
-          </button>
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+            {isStudent ? (
+              <button
+                className='btn btn-primary'
+                onClick={() => navigate('/courses')}>
+                Browse Courses <ChevronRight size={16} />
+              </button>
+            ) : (
+              <button
+                className='btn btn-primary'
+                onClick={() => navigate('/courses/new')}>
+                <Plus size={16} /> Create Course
+              </button>
+            )}
+          </div>
         </div>
         <div className='banner-decoration'></div>
-        <div className='banner-img'>
-          <img
-            src='https://cdni.iconscout.com/illustration/premium/thumb/online-education-5986333-4972754.png'
-            alt='Learning'
-            style={{ height: '100%', objectFit: 'contain' }}
-          />
-        </div>
       </div>
 
-      {/* 2. Stats Row */}
+      {/* Stats Row */}
       <div className='grid-4' style={{ marginBottom: '2rem' }}>
-        {/* Active Courses */}
-        <div
-          className='stat-card blue'
-          onClick={() => navigate('/courses')}
-          style={{ cursor: 'pointer' }}>
-          <BookOpen size={24} style={{ marginBottom: '0.5rem' }} />
-          <div style={{ fontSize: '2.5rem', fontWeight: '800' }}>
-            {metrics.activeCourses}
+        {[stats.card1, stats.card2, stats.card3, stats.card4].map((card, i) => (
+          <div key={i} className={`stat-card ${card.color}`}>
+            <card.icon
+              size={24}
+              style={{ marginBottom: '0.5rem', opacity: 0.8 }}
+            />
+            <div style={{ fontSize: '2.5rem', fontWeight: '800' }}>
+              {card.value}
+            </div>
+            <div
+              style={{
+                fontSize: '0.85rem',
+                fontWeight: '600',
+                opacity: 0.9,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+              }}>
+              {card.label}
+            </div>
+            <card.icon size={80} className='stat-icon-bg' />
           </div>
-          <div style={{ fontSize: '0.9rem', opacity: 0.9 }}>Active Courses</div>
-          <BookOpen size={80} className='stat-icon-bg' />
-        </div>
-
-        {/* Pending Assignments */}
-        <div
-          className='stat-card orange'
-          onClick={() => navigate('/assignments')}
-          style={{ cursor: 'pointer' }}>
-          <AlertCircle size={24} style={{ marginBottom: '0.5rem' }} />
-          <div style={{ fontSize: '2.5rem', fontWeight: '800' }}>
-            {metrics.pendingCount}
-          </div>
-          <div style={{ fontSize: '0.9rem', opacity: 0.9 }}>
-            Assignments Due
-          </div>
-          <AlertCircle size={80} className='stat-icon-bg' />
-        </div>
-
-        {/* Quiz Scores / Avg Grade */}
-        <div className='stat-card green'>
-          <Trophy size={24} style={{ marginBottom: '0.5rem' }} />
-          <div style={{ fontSize: '2.5rem', fontWeight: '800' }}>
-            {metrics.avgScore}%
-          </div>
-          <div style={{ fontSize: '0.9rem', opacity: 0.9 }}>Average Score</div>
-          <Trophy size={80} className='stat-icon-bg' />
-        </div>
-
-        {/* Upcoming Deadlines Count */}
-        <div className='stat-card red'>
-          <Calendar size={24} style={{ marginBottom: '0.5rem' }} />
-          <div style={{ fontSize: '2.5rem', fontWeight: '800' }}>
-            {metrics.upcomingTasks.length}
-          </div>
-          <div style={{ fontSize: '0.9rem', opacity: 0.9 }}>Due Soon</div>
-          <Calendar size={80} className='stat-icon-bg' />
-        </div>
+        ))}
       </div>
 
-      {/* 3. Main Grid Layout */}
+      {/* Main Grid */}
       <div className='dashboard-grid'>
-        {/* Left Column */}
+        {/* Left: Course List */}
         <div
           style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Continue Learning / Course List */}
           <div className='card'>
             <div
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                marginBottom: '1rem',
+                marginBottom: '1.5rem',
               }}>
-              <h3 style={{ margin: 0 }}>My Courses</h3>
+              <h3 style={{ margin: 0 }}>
+                {isStudent ? 'My Enrolled Courses' : 'Recent Courses'}
+              </h3>
               <Link
                 to='/courses'
                 style={{
                   fontSize: '0.85rem',
                   color: 'var(--primary)',
-                  fontWeight: '600',
+                  fontWeight: '700',
                   textDecoration: 'none',
                 }}>
                 View All
               </Link>
             </div>
 
-            {metrics.activeCourses > 0 ? (
-              <div>
-                {courses
-                  .filter((c) => currentUser.enrolledCourses?.includes(c._id))
-                  .slice(0, 3)
-                  .map((course) => (
-                    <div key={course._id} className='course-list-item'>
-                      <div style={{ minWidth: '200px' }}>
-                        <div style={{ fontWeight: '700', color: '#1e293b' }}>
-                          {course.title}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                          {course.modules.length} Modules • Instructor:{' '}
-                          {course.instructor.split(' ')[0]}
-                        </div>
-                      </div>
+            {stats.mainList.length > 0 ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem',
+                }}>
+                {stats.mainList.slice(0, 4).map((course) => (
+                  <div
+                    key={course._id}
+                    className='course-list-item'
+                    style={{
+                      background: '#f8fafc',
+                      borderRadius: '12px',
+                      border: '1px solid #f1f5f9',
+                    }}>
+                    <div style={{ minWidth: '200px' }}>
                       <div
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '1rem',
-                          flex: 1,
-                          justifyContent: 'flex-end',
+                          fontWeight: '700',
+                          color: '#1e293b',
+                          fontSize: '1rem',
                         }}>
-                        <div className='progress-track'>
-                          <div
-                            className='progress-fill-blue'
-                            style={{ width: `${course.progress}%` }}></div>
-                        </div>
-                        <button
-                          onClick={() => navigate(`/courses/${course._id}`)}
-                          className='btn btn-primary btn-sm'>
-                          Resume
-                        </button>
+                        {course.title}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                        {isStudent
+                          ? `Instructor: ${course.instructor}`
+                          : `${course.studentCount || 0} Students Enrolled`}
                       </div>
                     </div>
-                  ))}
-              </div>
-            ) : (
-              <div
-                style={{
-                  padding: '2rem',
-                  textAlign: 'center',
-                  color: '#94a3b8',
-                }}>
-                No active courses.{' '}
-                <Link to='/courses' className='text-primary font-bold'>
-                  Enroll now
-                </Link>
-              </div>
-            )}
-          </div>
-
-          {/* Quick Start Quiz Banner */}
-          <div
-            className='card'
-            style={{
-              background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
-              border: '1px solid #bfdbfe',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}>
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-              <div
-                style={{
-                  background: 'white',
-                  padding: '0.75rem',
-                  borderRadius: '12px',
-                  boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                }}>
-                <HelpCircle size={24} className='text-primary' />
-              </div>
-              <div>
-                <h3 style={{ fontSize: '1.1rem', margin: 0 }}>
-                  Quick Start Quiz
-                </h3>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: '#475569' }}>
-                  Test your knowledge with a new quiz
-                </p>
-              </div>
-            </div>
-            <button
-              className='btn btn-primary'
-              style={{ background: '#1e40af' }}>
-              Start Quiz
-            </button>
-          </div>
-
-          {/* Upcoming Deadlines List */}
-          <div className='card'>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '1rem',
-              }}>
-              <h3 style={{ margin: 0 }}>Upcoming Deadlines</h3>
-              <span
-                style={{
-                  fontSize: '0.85rem',
-                  color: '#64748b',
-                  cursor: 'pointer',
-                }}
-                onClick={() => navigate('/assignments')}>
-                View All
-              </span>
-            </div>
-            <div>
-              {metrics.upcomingTasks.length > 0 ? (
-                metrics.upcomingTasks.map((task, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '0.75rem 0',
-                      borderBottom:
-                        idx !== metrics.upcomingTasks.length - 1
-                          ? '1px solid #f1f5f9'
-                          : 'none',
-                    }}>
                     <div
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '0.75rem',
+                        gap: '1rem',
+                        flex: 1,
+                        justifyContent: 'flex-end',
+                      }}>
+                      {isStudent && (
+                        <div
+                          className='progress-track'
+                          style={{ height: '8px' }}>
+                          <div
+                            className='progress-fill-blue'
+                            style={{
+                              width: `${course.progress}%`,
+                              background: '#dc2626',
+                            }}></div>
+                        </div>
+                      )}
+                      <button
+                        onClick={() =>
+                          navigate(
+                            isStudent
+                              ? `/courses/${course._id}`
+                              : `/courses/${course._id}/edit`,
+                          )
+                        }
+                        className='btn btn-outline btn-sm'
+                        style={{ whiteSpace: 'nowrap' }}>
+                        {isStudent ? 'Resume' : 'Manage'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: '3rem',
+                  textAlign: 'center',
+                  color: '#94a3b8',
+                  border: '2px dashed #e2e8f0',
+                  borderRadius: '12px',
+                }}>
+                <p>No courses found.</p>
+                <button
+                  className='btn btn-primary btn-sm'
+                  onClick={() =>
+                    navigate(isStudent ? '/courses' : '/courses/new')
+                  }>
+                  {isStudent
+                    ? 'Enroll in a Course'
+                    : 'Create Your First Course'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Tasks / Activity */}
+        <div
+          style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {isStudent && (
+            <div className='card'>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '1.5rem',
+                }}>
+                <h3 style={{ margin: 0 }}>Upcoming Deadlines</h3>
+              </div>
+              <div>
+                {stats.sideList.length > 0 ? (
+                  stats.sideList.map((task, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '1rem',
+                        marginBottom: '1rem',
+                        paddingBottom: '1rem',
+                        borderBottom: '1px solid #f1f5f9',
                       }}>
                       <div
                         style={{
-                          background: `${task.color}20`,
-                          color: task.color,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          background: '#eff6ff',
                           padding: '0.5rem',
                           borderRadius: '8px',
+                          minWidth: '50px',
                         }}>
-                        <task.icon size={18} />
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            color: '#3b82f6',
+                            fontWeight: 'bold',
+                          }}>
+                          DUE
+                        </span>
+                        <span
+                          style={{
+                            fontSize: '1rem',
+                            fontWeight: '800',
+                            color: '#1e3a8a',
+                          }}>
+                          {task.dueDate.split('-')[2]}
+                        </span>
                       </div>
-                      <div>
+                      <div style={{ flex: 1 }}>
                         <div
                           style={{
                             fontWeight: '600',
@@ -399,163 +419,73 @@ const Dashboard = () => {
                           {task.courseTitle}
                         </div>
                       </div>
+                      <button
+                        className='btn btn-primary btn-sm'
+                        style={{ padding: '0.25rem 0.5rem' }}
+                        onClick={() => navigate(`/courses/${task.courseId}`)}>
+                        View
+                      </button>
                     </div>
-                    <span
-                      style={{
-                        fontSize: '0.8rem',
-                        color: '#64748b',
-                        fontWeight: '500',
-                      }}>
-                      Due: {task.dueDate}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div
-                  style={{
-                    textAlign: 'center',
-                    color: '#94a3b8',
-                    padding: '1rem',
-                  }}>
-                  No upcoming deadlines.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column */}
-        <div
-          style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Discussion Forum */}
-          <div className='card'>
-            <h3 style={{ marginBottom: '1rem' }}>Recent Discussions</h3>
-            {metrics.recentThreads.length > 0 ? (
-              <div>
-                {metrics.recentThreads.map((thread) => (
+                  ))
+                ) : (
                   <div
-                    key={thread._id}
-                    className='discussion-item'
-                    onClick={() => navigate(`/forum/thread/${thread._id}`)}
-                    style={{ cursor: 'pointer' }}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        gap: '0.5rem',
-                        alignItems: 'start',
-                      }}>
-                      <Flame
-                        size={16}
-                        className='text-primary'
-                        style={{ marginTop: '2px', flexShrink: 0 }}
-                      />
-                      <div>
-                        <div
-                          style={{
-                            fontSize: '0.9rem',
-                            fontWeight: '600',
-                            color: '#334155',
-                            lineHeight: '1.4',
-                          }}>
-                          {thread.title}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                          by {thread.authorName}
-                        </div>
-                      </div>
-                    </div>
-                    <span className='reply-badge'>
-                      {thread.comments.length}
-                    </span>
+                    style={{
+                      textAlign: 'center',
+                      color: '#94a3b8',
+                      padding: '1rem',
+                    }}>
+                    No upcoming deadlines.
                   </div>
-                ))}
-                <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-                  <Link
-                    to={
-                      courses.length > 0
-                        ? `/courses/${courses[0]._id}`
-                        : '/courses'
-                    }
-                    style={{
-                      fontSize: '0.85rem',
-                      color: 'var(--primary)',
-                      fontWeight: '600',
-                      textDecoration: 'none',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                    }}>
-                    View Forum <ChevronRight size={14} />
-                  </Link>
-                </div>
-              </div>
-            ) : (
-              <div
-                style={{
-                  textAlign: 'center',
-                  padding: '2rem 0',
-                  color: '#94a3b8',
-                  fontSize: '0.9rem',
-                }}>
-                No recent discussions found.
-              </div>
-            )}
-          </div>
-
-          {/* Your Progress */}
-          <div className='card'>
-            <h3 style={{ marginBottom: '1.5rem' }}>Your Progress</h3>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
-              <div style={{ flex: 1 }}>
-                <div
-                  style={{
-                    fontSize: '0.9rem',
-                    color: '#64748b',
-                    marginBottom: '0.25rem',
-                  }}>
-                  Assignment Completion
-                </div>
-                <div
-                  style={{
-                    fontSize: '2rem',
-                    fontWeight: '800',
-                    color: '#0f172a',
-                  }}>
-                  {metrics.completionRate}%
-                </div>
-              </div>
-
-              <div
-                className='donut-chart'
-                style={{
-                  background: `conic-gradient(var(--primary) 0% ${metrics.completionRate}%, #e2e8f0 ${metrics.completionRate}% 100%)`,
-                }}>
-                <div className='donut-inner'>
-                  <span
-                    style={{
-                      fontSize: '1.5rem',
-                      fontWeight: '800',
-                      color: '#0f172a',
-                    }}>
-                    {metrics.completionRate}%
-                  </span>
-                </div>
+                )}
               </div>
             </div>
+          )}
 
-            <div
-              style={{
-                marginTop: '1.5rem',
-                display: 'flex',
-                justifyContent: 'flex-end',
-              }}>
-              <button
-                className='btn btn-primary btn-sm'
-                onClick={() => navigate('/analytics')}>
-                View Analytics
-              </button>
+          {!isStudent && (
+            <div className='card'>
+              <h3 style={{ marginBottom: '1.5rem' }}>Quick Actions</h3>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem',
+                }}>
+                <button
+                  className='btn btn-outline w-full'
+                  style={{
+                    justifyContent: 'flex-start',
+                    border: '1px solid #e2e8f0',
+                    color: '#475569',
+                  }}
+                  onClick={() => navigate('/courses/new')}>
+                  <Plus size={18} className='text-primary' /> Create New Course
+                </button>
+                <button
+                  className='btn btn-outline w-full'
+                  style={{
+                    justifyContent: 'flex-start',
+                    border: '1px solid #e2e8f0',
+                    color: '#475569',
+                  }}
+                  onClick={() => navigate('/analytics')}>
+                  <TrendingUp size={18} className='text-primary' /> View
+                  Analytics
+                </button>
+                {isAdmin && (
+                  <button
+                    className='btn btn-outline w-full'
+                    style={{
+                      justifyContent: 'flex-start',
+                      border: '1px solid #e2e8f0',
+                      color: '#475569',
+                    }}
+                    onClick={() => navigate('/admin')}>
+                    <Users size={18} className='text-primary' /> User Management
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

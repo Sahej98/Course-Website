@@ -5,24 +5,27 @@ import {
   ArrowLeft,
   ThumbsUp,
   MessageSquare,
-  Share2,
-  MoreHorizontal,
-  CheckCircle,
-  Reply,
   User,
   Loader2,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { AlertModal } from '../components/CustomModals';
 
 const ThreadDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { fetchThreadById, replyThread, currentUser } = useApp();
+  const { fetchThreadById, replyThread } = useApp();
 
   const [thread, setThread] = useState(null);
   const [loading, setLoading] = useState(true);
   const [replyContent, setReplyContent] = useState('');
   const [isReplying, setIsReplying] = useState(false);
+  const [alertInfo, setAlertInfo] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info',
+  });
 
   useEffect(() => {
     const load = async () => {
@@ -46,7 +49,12 @@ const ThreadDetail = () => {
       setThread(updatedThread);
       setReplyContent('');
     } catch (error) {
-      alert('Failed to post reply');
+      setAlertInfo({
+        isOpen: true,
+        title: 'Error',
+        message: 'Failed to post reply.',
+        type: 'error',
+      });
     } finally {
       setIsReplying(false);
     }
@@ -66,6 +74,12 @@ const ThreadDetail = () => {
       animate={{ opacity: 1 }}
       className='animate-fade-in'
       style={{ paddingBottom: '2rem' }}>
+      <AlertModal
+        isOpen={alertInfo.isOpen}
+        onClose={() => setAlertInfo({ ...alertInfo, isOpen: false })}
+        {...alertInfo}
+      />
+
       {/* Breadcrumb */}
       <div
         style={{

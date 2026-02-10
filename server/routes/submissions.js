@@ -1,10 +1,11 @@
 import express from 'express';
 import Submission from '../models/Submission.js';
+import Notification from '../models/Notification.js';
 import { protect, authorize } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get ALL my submissions (across all courses)
+// Get ALL my submissions
 router.get('/my', protect, async (req, res) => {
     try {
         const submissions = await Submission.find({ studentId: req.user._id });
@@ -30,7 +31,6 @@ router.get('/my/:courseId', protect, async (req, res) => {
 // TEACHER: Get all submissions for a specific course
 router.get('/course/:courseId', protect, authorize('TEACHER', 'ADMIN'), async (req, res) => {
     try {
-        // populate student details to show name
         const submissions = await Submission.find({ courseId: req.params.courseId })
             .populate('studentId', 'name email avatar');
         res.json(submissions);
@@ -50,8 +50,18 @@ router.put('/:id/grade', protect, authorize('TEACHER', 'ADMIN'), async (req, res
         submission.grade = grade;
         submission.feedback = feedback;
         submission.status = 'graded';
+        submission.resubmissionRequested = false;
 
         await submission.save();
+
+        // Notify Student
+        await Notification.create({
+            userId: submission.studentId,
+            message: `Your assignment has been graded: ${grade} points.`,
+            type: 'success',
+            link: '/assignments'
+        });
+
         res.json(submission);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -60,7 +70,7 @@ router.put('/:id/grade', protect, authorize('TEACHER', 'ADMIN'), async (req, res
 
 // Submit an assignment
 router.post('/', protect, async (req, res) => {
-    const { courseId, assignmentId, content } = req.body;
+    const { courseId, assignmentId, content, answers } = req.body;
 
     try {
         const existing = await Submission.findOne({
@@ -70,8 +80,10 @@ router.post('/', protect, async (req, res) => {
         });
 
         if (existing) {
-            existing.content = content;
+            if (content) existing.content = content;
+            if (answers) existing.answers = answers;
             existing.status = 'submitted'; // reset status if re-submitted
+            existing.resubmissionRequested = false;
             const updated = await existing.save();
             return res.json(updated);
         }
@@ -80,12 +92,51 @@ router.post('/', protect, async (req, res) => {
             courseId,
             assignmentId,
             studentId: req.user._id,
-            content
+            content,
+            answers
         });
 
         res.status(201).json(submission);
     } catch (error) {
         res.status(400).json({ message: error.message });
+    }
+});
+
+// Request Resubmission
+router.post('/:id/request-resubmit', protect, async (req, res) => {
+    try {
+        const submission = await Submission.findOne({ _id: req.params.id, studentId: req.user._id });
+        if (!submission) return res.status(404).json({ message: 'Submission not found' });
+
+        submission.resubmissionRequested = true;
+        await submission.save();
+        res.json({ message: 'Request sent' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Approve Resubmission
+router.post('/:id/approve-resubmit', protect, authorize('TEACHER', 'ADMIN'), async (req, res) => {
+    try {
+        const submission = await Submission.findById(req.params.id);
+        if (!submission) return res.status(404).json({ message: 'Submission not found' });
+
+        submission.status = 'pending'; // Allow resubmit
+        submission.resubmissionRequested = false;
+        await submission.save();
+
+        // Notify Student
+        await Notification.create({
+            userId: submission.studentId,
+            message: `Resubmission approved for your assignment.`,
+            type: 'info',
+            link: '/assignments'
+        });
+
+        res.json({ message: 'Resubmission approved' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
     }
 });
 

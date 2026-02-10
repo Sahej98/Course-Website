@@ -15,10 +15,9 @@ import AdminPanel from './views/AdminPanel';
 import AnalyticsComponent from './components/Analytics';
 import CourseCard from './components/CourseCard';
 import Login from './views/Login';
-import Register from './views/Register';
 import Profile from './views/Profile';
-import Assignments from './views/Assignments';
 import ThreadDetail from './views/ThreadDetail';
+import LoadingScreen from './components/LoadingScreen';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Plus, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -26,10 +25,10 @@ import Forum from './components/Forum';
 
 const CourseList = () => {
   const { courses, currentUser } = useApp();
+  // Allow Instructors and Admins to create courses
   const canCreate =
     currentUser?.role === 'TEACHER' || currentUser?.role === 'ADMIN';
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('recent');
   const [filterCategory, setFilterCategory] = useState('all');
 
   // Filter logic
@@ -37,13 +36,7 @@ const CourseList = () => {
     const matchesSearch =
       course.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       course.instructor.toLowerCase().includes(searchTerm.toLowerCase());
-    // Mock category check as course doesn't have category field yet, assume 'all' for now or check title
-    const matchesCategory =
-      filterCategory === 'all'
-        ? true
-        : course.title.toLowerCase().includes(filterCategory.toLowerCase());
-
-    return matchesSearch && matchesCategory;
+    return matchesSearch;
   });
 
   return (
@@ -61,10 +54,10 @@ const CourseList = () => {
             color: '#0f172a',
             marginBottom: '0.5rem',
           }}>
-          My Courses
+          Browse Courses
         </h1>
         <p style={{ color: '#64748b', fontSize: '1rem' }}>
-          Manage and participate in your courses here.
+          Find your next learning adventure.
         </p>
       </div>
 
@@ -81,30 +74,11 @@ const CourseList = () => {
         </div>
 
         <div className='filter-group'>
-          <select
-            className='filter-select'
-            value={filterCategory}
-            onChange={(e) => setFilterCategory(e.target.value)}>
-            <option value='all'>All Categories</option>
-            <option value='development'>Development</option>
-            <option value='design'>Design</option>
-            <option value='business'>Business</option>
-          </select>
-
-          <select
-            className='filter-select'
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}>
-            <option value='recent'>Sort By: Most Recent</option>
-            <option value='progress'>Sort By: Progress</option>
-            <option value='title'>Sort By: Title</option>
-          </select>
-
           {canCreate && (
             <Link
               to='/courses/new'
               className='btn btn-primary'
-              style={{ whiteSpace: 'nowrap' }}>
+              style={{ whiteSpace: 'nowrap', background: '#dc2626' }}>
               <Plus size={18} /> Create New Course
             </Link>
           )}
@@ -119,7 +93,14 @@ const CourseList = () => {
           ))}
         </div>
       ) : (
-        <div style={{ textAlign: 'center', padding: '4rem', color: '#94a3b8' }}>
+        <div
+          style={{
+            textAlign: 'center',
+            padding: '4rem',
+            color: '#94a3b8',
+            border: '2px dashed #e2e8f0',
+            borderRadius: '12px',
+          }}>
           <p>No courses found matching your criteria.</p>
         </div>
       )}
@@ -131,12 +112,7 @@ const ProtectedRoute = ({ children }) => {
   const { currentUser, loading } = useApp();
   const location = useLocation();
 
-  if (loading)
-    return (
-      <div className='flex h-screen items-center justify-center'>
-        Loading...
-      </div>
-    );
+  if (loading) return <LoadingScreen />;
   if (!currentUser)
     return <Navigate to='/login' state={{ from: location }} replace />;
 
@@ -145,12 +121,14 @@ const ProtectedRoute = ({ children }) => {
 
 const AnimatedRoutes = () => {
   const location = useLocation();
+  const { loading } = useApp();
+
+  if (loading) return <LoadingScreen />;
 
   return (
     <AnimatePresence mode='wait'>
       <Routes location={location} key={location.pathname}>
         <Route path='/login' element={<Login />} />
-        <Route path='/register' element={<Register />} />
 
         <Route
           path='/'
@@ -197,14 +175,6 @@ const AnimatedRoutes = () => {
           element={
             <ProtectedRoute>
               <CourseForm />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path='/assignments'
-          element={
-            <ProtectedRoute>
-              <Assignments />
             </ProtectedRoute>
           }
         />

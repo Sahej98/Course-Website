@@ -3,19 +3,57 @@ import axios from 'axios';
 
 const AppContext = createContext();
 
+// For split deployment (Vercel + Render), we must use the absolute URL from env vars in production.
+// In dev, we fallback to localhost.
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: API_URL,
   withCredentials: true,
 });
 
 export const AppProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [courses, setCourses] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Setup Axios Interceptor to handle 401s automatically
+  useEffect(() => {
+    const interceptor = api.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (
+          error.response &&
+          (error.response.status === 401 || error.response.status === 403)
+        ) {
+          // Only clear user if we actually had one, to avoid loops on public pages if we had them
+          if (currentUser) setCurrentUser(null);
+        }
+        return Promise.reject(error);
+      },
+    );
+    return () => api.interceptors.response.eject(interceptor);
+  }, [currentUser]);
+
+  // 1. Check Auth ONLY on mount
   useEffect(() => {
     checkAuth();
   }, []);
+
+  // 2. Poll for notifications ONLY when currentUser exists
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Fetch immediately
+    fetchNotifications();
+
+    const interval = setInterval(() => {
+      fetchNotifications();
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   const checkAuth = async () => {
     try {
@@ -23,10 +61,27 @@ export const AppProvider = ({ children }) => {
       setCurrentUser(data);
       await fetchCourses();
     } catch (error) {
+      console.warn('Auth check failed or server unavailable.');
       setCurrentUser(null);
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchNotifications = async () => {
+    try {
+      const { data } = await api.get('/notifications');
+      setNotifications(data);
+    } catch (e) {
+      console.error('Notifs error');
+    }
+  };
+
+  const markNotificationRead = async (id) => {
+    await api.put(`/notifications/${id}/read`);
+    setNotifications(
+      notifications.map((n) => (n._id === id ? { ...n, read: true } : n)),
+    );
   };
 
   const fetchCourses = async () => {
@@ -34,7 +89,7 @@ export const AppProvider = ({ children }) => {
       const { data } = await api.get('/courses');
       setCourses(data);
     } catch (error) {
-      console.error('Failed to fetch courses');
+      console.error('Failed to fetch courses.');
     }
   };
 
@@ -67,21 +122,47 @@ export const AppProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    await api.post('/auth/logout');
+    try {
+      await api.post('/auth/logout');
+    } catch (e) {
+      /* ignore */
+    }
     setCurrentUser(null);
     setCourses([]);
+    setNotifications([]);
+  };
+
+  const updateProfile = async (userData) => {
+    const { data } = await api.put('/auth/update', userData);
+    setCurrentUser(data);
+    return data;
   };
 
   const enrollCourse = async (courseId) => {
     try {
       await api.post(`/courses/${courseId}/enroll`);
-      // Refresh user to update enrolledCourses
       const { data } = await api.get('/auth/me');
       setCurrentUser(data);
       return true;
     } catch (error) {
       throw error;
     }
+  };
+
+  // Upload
+  const uploadFile = async (file, onProgress) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post('/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (progressEvent) => {
+        const percentCompleted = Math.round(
+          (progressEvent.loaded * 100) / progressEvent.total,
+        );
+        if (onProgress) onProgress(percentCompleted);
+      },
+    });
+    return data;
   };
 
   // Course Management
@@ -102,12 +183,19 @@ export const AppProvider = ({ children }) => {
     setCourses(courses.filter((c) => c._id !== id));
   };
 
+  const bulkCreateCourses = async (coursesData) => {
+    const { data } = await api.post('/courses/bulk', coursesData);
+    await fetchCourses();
+    return data;
+  };
+
   // Submissions
-  const submitAssignment = async (courseId, assignmentId, content) => {
+  const submitAssignment = async (courseId, assignmentId, content, answers) => {
     const { data } = await api.post('/submissions', {
       courseId,
       assignmentId,
       content,
+      answers,
     });
     return data;
   };
@@ -133,6 +221,14 @@ export const AppProvider = ({ children }) => {
       feedback,
     });
     return data;
+  };
+
+  const requestResubmission = async (submissionId) => {
+    await api.post(`/submissions/${submissionId}/request-resubmit`);
+  };
+
+  const approveResubmission = async (submissionId) => {
+    await api.post(`/submissions/${submissionId}/approve-resubmit`);
   };
 
   // Forum
@@ -182,6 +278,21 @@ export const AppProvider = ({ children }) => {
     return data;
   };
 
+  const adminCreateUser = async (userData) => {
+    const { data } = await api.post('/admin/users', userData);
+    return data;
+  };
+
+  const adminBulkCreateUsers = async (usersData) => {
+    const { data } = await api.post('/admin/users/bulk', usersData);
+    return data;
+  };
+
+  const adminUpdateUser = async (id, userData) => {
+    const { data } = await api.put(`/admin/users/${id}`, userData);
+    return data;
+  };
+
   const fetchAdminCourses = async () => {
     const { data } = await api.get('/admin/courses');
     return data;
@@ -209,12 +320,15 @@ export const AppProvider = ({ children }) => {
         createCourse,
         updateCourse,
         deleteCourse,
+        bulkCreateCourses,
         enrollCourse,
         submitAssignment,
         getUserSubmissions,
         getAllMySubmissions,
         getCourseSubmissions,
         gradeSubmission,
+        requestResubmission,
+        approveResubmission,
         fetchThreads,
         fetchThreadById,
         fetchForumStats,
@@ -223,9 +337,16 @@ export const AppProvider = ({ children }) => {
         resolveThread,
         fetchAnalytics,
         fetchAllUsers,
+        adminCreateUser,
+        adminBulkCreateUsers,
+        adminUpdateUser,
         fetchAdminCourses,
         deleteUser,
         fetchAdminStats,
+        uploadFile,
+        notifications,
+        markNotificationRead,
+        updateProfile,
       }}>
       {children}
     </AppContext.Provider>
